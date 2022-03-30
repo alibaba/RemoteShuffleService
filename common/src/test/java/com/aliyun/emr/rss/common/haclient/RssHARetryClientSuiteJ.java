@@ -59,8 +59,7 @@ public class RssHARetryClientSuiteJ {
 
   @Before
   public void beforeEach() {
-    rssConf.set("rss.rpc.askTimeout", "5s")
-      .set("rss.network.timeout", "5s")
+    rssConf.set("rss.network.timeout", "5s")
       .set("rss.master.port", String.valueOf(masterPort));
     rpcEnv = Mockito.mock(RpcEnv.class);
     endpointRef = Mockito.mock(RpcEndpointRef.class);

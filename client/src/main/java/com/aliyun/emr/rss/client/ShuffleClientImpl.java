@@ -74,6 +74,7 @@ import com.aliyun.emr.rss.common.rpc.RpcAddress;
 import com.aliyun.emr.rss.common.rpc.RpcEndpointRef;
 import com.aliyun.emr.rss.common.rpc.RpcEnv;
 import com.aliyun.emr.rss.common.unsafe.Platform;
+import com.aliyun.emr.rss.common.util.RpcUtils;
 import com.aliyun.emr.rss.common.util.ThreadUtils;
 import com.aliyun.emr.rss.common.util.Utils;
 
@@ -248,8 +249,9 @@ public class ShuffleClientImpl extends ShuffleClient {
     while (numRetries > 0) {
       try {
         RegisterShuffleResponse response = driverRssMetaService.<RegisterShuffleResponse>askSync(
-            new RegisterShuffle(appId, shuffleId, numMappers, numPartitions),
-            ClassTag$.MODULE$.<RegisterShuffleResponse>apply(RegisterShuffleResponse.class)
+          new RegisterShuffle(appId, shuffleId, numMappers, numPartitions),
+          RpcUtils.registerShuffleRpcTimeout(conf),
+          ClassTag$.MODULE$.<RegisterShuffleResponse>apply(RegisterShuffleResponse.class)
         );
 
         if (response.status().equals(StatusCode.Success)) {
@@ -358,9 +360,10 @@ public class ShuffleClientImpl extends ShuffleClient {
 
     try {
       ReviveResponse response = driverRssMetaService.<ReviveResponse>askSync(
-          new Revive(applicationId, shuffleId, mapId, attemptId,
-                  reduceId, epoch, oldLocation, cause),
-          ClassTag$.MODULE$.<ReviveResponse>apply(ReviveResponse.class)
+        new Revive(applicationId, shuffleId, mapId, attemptId,
+          reduceId, epoch, oldLocation, cause),
+        RpcUtils.reviveRpcTimeout(conf),
+        ClassTag$.MODULE$.<ReviveResponse>apply(ReviveResponse.class)
       );
 
       // per partitionKey only serve single PartitionLocation in Client Cache.
@@ -730,8 +733,9 @@ public class ShuffleClientImpl extends ShuffleClient {
       limitMaxInFlight(mapKey, pushState, 0);
 
       MapperEndResponse response = driverRssMetaService.<MapperEndResponse>askSync(
-          new MapperEnd(applicationId, shuffleId, mapId, attemptId, numMappers),
-          ClassTag$.MODULE$.<MapperEndResponse>apply(MapperEndResponse.class)
+        new MapperEnd(applicationId, shuffleId, mapId, attemptId, numMappers),
+        RpcUtils.mapperEndRpcTimeout(conf),
+        ClassTag$.MODULE$.<MapperEndResponse>apply(MapperEndResponse.class)
       );
       if (response.status() != StatusCode.Success) {
         throw new IOException("MapperEnd failed! StatusCode: " + response.status());
@@ -788,7 +792,10 @@ public class ShuffleClientImpl extends ShuffleClient {
           ClassTag$.MODULE$.apply(GetReducerFileGroupResponse.class);
 
         GetReducerFileGroupResponse response =
-          driverRssMetaService.<GetReducerFileGroupResponse>askSync(getReducerFileGroup, classTag);
+          driverRssMetaService.<GetReducerFileGroupResponse>askSync(
+            getReducerFileGroup,
+            RpcUtils.getReducerFileGroupResponseRpcTimeout(conf),
+            classTag);
 
         if (response != null && response.status() == StatusCode.Success) {
           return new ReduceFileGroups(response.fileGroup(), response.attempts());

@@ -57,7 +57,7 @@ public class RssHARetryClient {
   private final List<String> masterHosts;
   private final int maxTries;
 
-  private final RpcTimeout rpcTimeout;
+  private final RpcTimeout defaultRpcTimeout;
 
   private final AtomicReference<RpcEndpointRef> rpcEndpointRef;
   private final ExecutorService oneWayMessageSender;
@@ -67,7 +67,7 @@ public class RssHARetryClient {
     this.masterPort = RssConf.masterPort(conf);
     this.masterHosts = Arrays.asList(RssConf.haMasterHosts(conf).split(","));
     this.maxTries = Math.max(masterHosts.size(), RssConf.haClientMaxTries(conf));
-    this.rpcTimeout = RpcUtils.askRpcTimeout(conf);
+    this.defaultRpcTimeout = RpcUtils.askRpcTimeout(conf);
     this.rpcEndpointRef = new AtomicReference<>();
     this.oneWayMessageSender = ThreadUtils.newDaemonSingleThreadExecutor("One-Way-Message-Sender");
   }
@@ -108,7 +108,7 @@ public class RssHARetryClient {
     // choose to use one Thread pool to use synchronization.
     oneWayMessageSender.submit(() -> {
       try {
-        sendMessageInner(message, OneWayMessageResponse$.class);
+        sendMessageInner(message, OneWayMessageResponse$.class, defaultRpcTimeout);
       } catch (Throwable e) {
         LOG.warn("Exception occurs while send one-way message.", e);
       }
@@ -116,8 +116,12 @@ public class RssHARetryClient {
     LOG.debug("Send one-way message {}.", message);
   }
 
+  public <T> T askSync(Message message, Class<T> clz, RpcTimeout timeout) throws Throwable {
+    return sendMessageInner(message, clz, timeout);
+  }
+
   public <T> T askSync(Message message, Class<T> clz) throws Throwable {
-    return sendMessageInner(message, clz);
+    return sendMessageInner(message, clz, defaultRpcTimeout);
   }
 
   public void close() {
@@ -125,7 +129,8 @@ public class RssHARetryClient {
   }
 
   @SuppressWarnings("UnstableApiUsage")
-  private <T> T sendMessageInner(Message message, Class<T> clz) throws Throwable {
+  private <T> T sendMessageInner(Message message, Class<T> clz,
+      RpcTimeout timeout) throws Throwable {
     Throwable throwable = null;
     int numTries = 0;
     boolean shouldRetry = true;
@@ -144,8 +149,8 @@ public class RssHARetryClient {
     while (numTries < maxTries && shouldRetry) {
       try {
         endpointRef = getOrSetupRpcEndpointRef(currentMasterIdx);
-        Future<T> future = endpointRef.ask(message, rpcTimeout, ClassTag$.MODULE$.apply(clz));
-        return rpcTimeout.awaitResult(future);
+        Future<T> future = endpointRef.ask(message, timeout, ClassTag$.MODULE$.apply(clz));
+        return timeout.awaitResult(future);
       } catch (Throwable e) {
         throwable = e;
         shouldRetry = shouldRetry(endpointRef, throwable);

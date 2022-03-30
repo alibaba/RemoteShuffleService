@@ -34,7 +34,8 @@ import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.junit.Test;
-import static org.mockito.Matchers.any;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -141,9 +142,11 @@ public class ShuffleClientSuiteJ {
     shuffleClient = new ShuffleClientImpl(conf);
 
     masterLocation.setPeer(slaveLocation);
-    when(endpointRef.askSync(new ControlMessages.RegisterShuffle(TEST_APPLICATION_ID,
-        TEST_SHUFFLE_ID, 1, 1),
-      ClassTag$.MODULE$.apply(ControlMessages.RegisterShuffleResponse.class)))
+
+    when(endpointRef.askSync(
+      eq(new ControlMessages.RegisterShuffle(TEST_APPLICATION_ID, TEST_SHUFFLE_ID, 1, 1)),
+      any(),
+      eq(ClassTag$.MODULE$.apply(ControlMessages.RegisterShuffleResponse.class))))
       .thenAnswer(t -> new ControlMessages.RegisterShuffleResponse(StatusCode.Success,
         new ArrayList<PartitionLocation>() {{
             add(masterLocation);

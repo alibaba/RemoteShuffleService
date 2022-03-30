@@ -547,10 +547,6 @@ object RssConf extends Logging {
     conf.getInt("rss.worker.base.dir.number", 16)
   }
 
-  def stageEndTimeout(conf: RssConf): Long = {
-    conf.getTimeAsMs("rss.stage.end.timeout", "240s")
-  }
-
   def limitInFlightTimeoutMs(conf: RssConf): Long = {
     conf.getTimeAsMs("rss.limit.inflight.timeout", "240s")
   }
