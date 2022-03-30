@@ -18,6 +18,8 @@
 package com.aliyun.emr.rss.common
 
 
+import java.io.File
+import java.nio.file.Paths
 import java.util.{Map => JMap}
 import java.util.concurrent.ConcurrentHashMap
 
@@ -413,6 +415,21 @@ object RssConf extends Logging {
       translation: String => String = null)
 
   // Conf getters
+  def rssOperationScriptLocation(conf: RssConf, scriptName: String): String = {
+    if (null == scriptName) {
+      return null
+    }
+    val scriptLocation: String = conf.get("rss.operation.script.location", null)
+    if (null == scriptLocation) {
+      sys.env.get("RSS_HOME")
+        .map(rssHome => new File(s"$rssHome${File.separator}sbin"))
+        .filter(_.isDirectory)
+        .map(dir => Paths.get(dir.getAbsolutePath).resolve(scriptName).toString)
+        .orNull
+    } else {
+      scriptLocation + "/" + scriptName
+    }
+  }
 
   def pushDataBufferSize(conf: RssConf): Int = {
     conf.getSizeAsBytes("rss.push.data.buffer.size", "64k").toInt

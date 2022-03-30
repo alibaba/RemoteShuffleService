@@ -407,7 +407,7 @@ sealed trait WorkerMessage extends Message
 sealed trait ClientMessage extends Message
 
 object ControlMessages extends Logging{
-  val ZERO_UUID = new UUID(0L, 0L).toString
+  val ZERO_UUID: String = new UUID(0L, 0L).toString
 
   type WorkerResource = java.util.HashMap[WorkerInfo,
     (java.util.List[PartitionLocation], java.util.List[PartitionLocation])]

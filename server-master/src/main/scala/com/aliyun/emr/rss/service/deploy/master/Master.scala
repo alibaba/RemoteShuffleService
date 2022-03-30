@@ -247,7 +247,7 @@ private[deploy] class Master(
     if (worker == null) {
       logWarning(
         s"""Received heartbeat from unknown worker!
-           | Worker details :  $host:$rpcPort$pushPort$fetchPort.""".stripMargin)
+           | Worker details :  $host:$rpcPort:$pushPort:$fetchPort """.stripMargin)
       return
     }
 
