@@ -17,14 +17,13 @@
 
 package com.aliyun.emr.rss.service.deploy.cluster
 
-import com.aliyun.emr.rss.client.ShuffleClientImpl
+import com.aliyun.emr.rss.client.{LifecycleManager, ShuffleClientImpl}
 
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 import io.netty.channel.ChannelFuture
 import org.apache.commons.lang3.RandomStringUtils
 import org.junit.{Assert, Test}
-import com.aliyun.emr.rss.client.write.LifecycleManager
 import com.aliyun.emr.rss.common.RssConf
 import com.aliyun.emr.rss.common.rpc.RpcEnv
 import com.aliyun.emr.rss.service.deploy.MiniClusterFeature

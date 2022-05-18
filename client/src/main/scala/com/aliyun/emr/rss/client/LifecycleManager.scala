@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package com.aliyun.emr.rss.client.write
+package com.aliyun.emr.rss.client
 
 import java.util
 import java.util.concurrent.{ConcurrentHashMap, ScheduledFuture, TimeUnit}
@@ -31,8 +31,8 @@ import com.aliyun.emr.rss.common.RssConf
 import com.aliyun.emr.rss.common.haclient.RssHARetryClient
 import com.aliyun.emr.rss.common.internal.Logging
 import com.aliyun.emr.rss.common.meta.{PartitionLocationInfo, WorkerInfo}
-import com.aliyun.emr.rss.common.protocol.{PartitionLocation, RpcNameConstants}
-import com.aliyun.emr.rss.common.protocol.RpcNameConstants.WORKER_EP
+import com.aliyun.emr.rss.common.protocol.PartitionLocation
+import com.aliyun.emr.rss.common.protocol.RpcNameConstants.{RSS_METASERVICE_EP, RSS_METASERVICE_SYS, WORKER_EP}
 import com.aliyun.emr.rss.common.protocol.message.ControlMessages._
 import com.aliyun.emr.rss.common.protocol.message.StatusCode
 import com.aliyun.emr.rss.common.rpc._
@@ -74,7 +74,7 @@ class LifecycleManager(appId: String, val conf: RssConf) extends RpcEndpoint wit
   private val registerShuffleRequest = new ConcurrentHashMap[Int, util.Set[RpcCallContext]]()
 
   // blacklist
-  private val blacklist = new ConcurrentSet[WorkerInfo]()
+  private val blacklistManager = new BlacklistManager(rpcEnv, shuffleAllocatedWorkers)
 
   // Threads
   private val forwardMessageThread =
@@ -90,11 +90,11 @@ class LifecycleManager(appId: String, val conf: RssConf) extends RpcEndpoint wit
 
   // init driver rss meta rpc service
   override val rpcEnv: RpcEnv = RpcEnv.create(
-    RpcNameConstants.RSS_METASERVICE_SYS,
+    RSS_METASERVICE_SYS,
     lifecycleHost,
     RssConf.driverMetaServicePort(conf),
     conf)
-  rpcEnv.setupEndpoint(RpcNameConstants.RSS_METASERVICE_EP, this)
+  rpcEnv.setupEndpoint(RSS_METASERVICE_EP, this)
 
   logInfo(s"Start LifecycleManager on ${rpcEnv.address}")
 
@@ -134,7 +134,8 @@ class LifecycleManager(appId: String, val conf: RssConf) extends RpcEndpoint wit
 
     getBlacklist = forwardMessageThread.scheduleAtFixedRate(new Runnable {
       override def run(): Unit = Utils.tryLogNonFatalError {
-        self.send(GetBlacklist(new util.ArrayList[WorkerInfo](blacklist)))
+        self.send(GetBlacklist(new util.ArrayList[WorkerInfo](
+          blacklistManager.getBlacklist())))
       }
     }, GetBlacklistDelayMs, GetBlacklistDelayMs, TimeUnit.MILLISECONDS)
   }
@@ -778,7 +779,7 @@ class LifecycleManager(appId: String, val conf: RssConf) extends RpcEndpoint wit
     val failed = new util.ArrayList[WorkerInfo]()
 
     slots.asScala.foreach { entry =>
-      if (blacklist.contains(entry._1)) {
+      if (blacklistManager.contains(entry._1)) {
         logWarning(s"[reserve buffer] failed due to blacklist: ${entry._1}")
         failed.add(entry._1)
       } else {
@@ -837,6 +838,8 @@ class LifecycleManager(appId: String, val conf: RssConf) extends RpcEndpoint wit
           if (null != transportClient && transportClient.isActive) {
             transportClient.close()
           }
+        } else {
+          blacklistManager.addBlacklist(workerInfo)
         }
       })
 
@@ -919,7 +922,7 @@ class LifecycleManager(appId: String, val conf: RssConf) extends RpcEndpoint wit
       // add candidates to avoid revive action passed in slots only 2 worker
       retryCandidates.addAll(candidates.asJava)
       // remove blacklist from retryCandidates
-      retryCandidates.removeAll(blacklist)
+      retryCandidates.removeAll(blacklistManager.getBlacklist())
 
       val retrySlots = reallocateSlotsFromCandidates(failedPartitionLocations.values.toList,
         retryCandidates.asScala.toList)
@@ -1061,13 +1064,8 @@ class LifecycleManager(appId: String, val conf: RssConf) extends RpcEndpoint wit
     if (res.statusCode == StatusCode.Success) {
       logInfo(s"Received Blacklist from Master, blacklist: ${res.blacklist} " +
         s"unkown workers: ${res.unknownWorkers}")
-      blacklist.clear()
-      if (res.blacklist != null) {
-        blacklist.addAll(res.blacklist)
-      }
-      if (res.unknownWorkers != null) {
-        blacklist.addAll(res.unknownWorkers)
-      }
+      blacklistManager.addBlacklists(res.blacklist)
+      blacklistManager.addUnknownWorker(res.unknownWorkers)
     }
   }
 
@@ -1166,12 +1164,13 @@ class LifecycleManager(appId: String, val conf: RssConf) extends RpcEndpoint wit
 
   private def recordWorkerFailure(failures: util.List[WorkerInfo]): Unit = {
     val failedWorker = new util.ArrayList[WorkerInfo](failures)
-    failedWorker.removeAll(blacklist)
+    failedWorker.removeAll(blacklistManager.getBlacklist())
     if (failedWorker.isEmpty) {
       return
     }
-    logInfo(s"Report Worker Failure: ${failedWorker.asScala}, current blacklist $blacklist")
-    blacklist.addAll(failedWorker)
+    logInfo(s"Report Worker Failure: ${failedWorker.asScala}," +
+      s" current blacklist ${blacklistManager.getBlacklist()}")
+    blacklistManager.addBlacklists(failedWorker)
   }
 
   def isClusterOverload(numPartitions: Int = 0): Boolean = {
@@ -1199,7 +1198,7 @@ class LifecycleManager(appId: String, val conf: RssConf) extends RpcEndpoint wit
     workerSnapshots(shuffleId)
       .keySet()
       .asScala
-      .filter(w => !blacklist.contains(w))
+      .filter(w => !blacklistManager.contains(w))
       .toList
   }
 

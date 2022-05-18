@@ -50,7 +50,7 @@ public class ChannelsLimiter extends ChannelDuplexHandler
     });
   }
 
-  private void trimCache(){
+  private void trimCache() {
     channels.forEach(c->c.pipeline().fireUserEventTriggered(new TrimCache()));
   }
 

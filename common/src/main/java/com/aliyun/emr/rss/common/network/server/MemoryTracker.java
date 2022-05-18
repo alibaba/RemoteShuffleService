@@ -273,7 +273,7 @@ public class MemoryTracker {
     return pausePushDataCounter.sum();
   }
 
-  public long getPausePushDataAndReplicateCounter(){
+  public long getPausePushDataAndReplicateCounter() {
     return pausePushDataAndReplicateCounter.sum();
   }
 

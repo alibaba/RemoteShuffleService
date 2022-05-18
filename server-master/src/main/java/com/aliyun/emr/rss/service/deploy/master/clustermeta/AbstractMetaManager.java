@@ -145,7 +145,7 @@ public abstract class AbstractMetaManager implements IMetadataHandler {
       LOG.warn("Worker: {} num total slots is 0, add to blacklist", worker.toString());
       blacklist.add(worker);
     } else if (numSlots > 0) {
-      // only unblack if numSlots larger than 0
+      // only unblock if numSlots larger than 0
       blacklist.remove(worker);
     }
   }
