@@ -17,14 +17,13 @@
 
 package com.aliyun.emr.rss.service.deploy.cluster
 
-import com.aliyun.emr.rss.client.ShuffleClientImpl
+import com.aliyun.emr.rss.client.{LifecycleManager, ShuffleClientImpl}
 
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 import io.netty.channel.ChannelFuture
 import org.apache.commons.lang3.RandomStringUtils
 import org.junit.{Assert, Test}
-import com.aliyun.emr.rss.client.write.LifecycleManager
 import com.aliyun.emr.rss.common.RssConf
 import com.aliyun.emr.rss.common.rpc.RpcEnv
 import com.aliyun.emr.rss.service.deploy.MiniClusterFeature
@@ -48,14 +47,14 @@ class ClusterReadWriteTest extends MiniClusterFeature {
     val OFFSET1 = 0
     val LENGTH1 = DATA1.length
 
-    val dataSize1 = shuffleClient.pushData(APP, 1, 0, 0, 0, DATA1, OFFSET1, LENGTH1, 1, 1)
+    val dataSize1 = shuffleClient.pushData(APP, 1, 0, 0, 0, OFFSET1, LENGTH1, 1, 1, false, DATA1)
     logInfo(s"push data data size ${dataSize1}")
 
     val STR2 = RandomStringUtils.random(32 * 1024)
     val DATA2 = STR2.getBytes(StandardCharsets.UTF_8)
     val OFFSET2 = 0
     val LENGTH2 = DATA2.length
-    val dataSize2 = shuffleClient.pushData(APP, 1, 0, 0, 0, DATA2, OFFSET2, LENGTH2, 1, 1)
+    val dataSize2 = shuffleClient.pushData(APP, 1, 0, 0, 0, OFFSET2, LENGTH2, 1, 1, false, DATA2)
     logInfo(s"push data data size ${dataSize2}")
 
     val STR3 = RandomStringUtils.random(32 * 1024)

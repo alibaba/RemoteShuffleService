@@ -18,6 +18,8 @@
 package com.aliyun.emr.rss.client.write;
 
 import java.io.IOException;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -32,8 +34,8 @@ import com.aliyun.emr.rss.common.RssConf;
 public class DataPusher {
   private final long WAIT_TIME_NANOS = TimeUnit.MILLISECONDS.toNanos(500);
 
-  private final LinkedBlockingQueue<PushTask> idleQueue;
-  private final LinkedBlockingQueue<PushTask> workingQueue;
+  private final LinkedBlockingQueue<DataTask> idleQueue;
+  private final LinkedBlockingQueue<DataTask> workingQueue;
 
   private final ReentrantLock idleLock = new ReentrantLock();
   private final Condition idleFull = idleLock.newCondition();
@@ -52,6 +54,12 @@ public class DataPusher {
   private volatile boolean terminated;
   private LongAdder[] mapStatusLengths;
 
+  private Map<Integer, CompositeBuffer> compositeBuffers = new ConcurrentHashMap<>();
+  private LongAdder totalCompositeSize = new LongAdder();
+  private final int MAX_COMPOSITE_SIZE;
+  private final int SEND_BUFFER_SIZE;
+  private final DataTask FlushTask = new DataTask(0);
+
   public DataPusher(
       String appId,
       int shuffleId,
@@ -66,13 +74,15 @@ public class DataPusher {
       LongAdder[] mapStatusLengths) throws IOException {
     final int capacity = RssConf.pushDataQueueCapacity(conf);
     final int bufferSize = RssConf.pushDataBufferSize(conf);
+    MAX_COMPOSITE_SIZE = RssConf.pushDataMaxCompositeSize(conf);
+    SEND_BUFFER_SIZE = RssConf.pushDataBufferSize(conf);
 
     idleQueue = new LinkedBlockingQueue<>(capacity);
     workingQueue = new LinkedBlockingQueue<>(capacity);
 
     for (int i = 0; i < capacity; i++) {
       try {
-        idleQueue.put(new PushTask(bufferSize));
+        idleQueue.put(new DataTask(bufferSize));
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
         throw new IOException(e);
@@ -90,7 +100,7 @@ public class DataPusher {
     this.mapStatusLengths = mapStatusLengths;
 
     new Thread("DataPusher-" + taskId) {
-      private void reclaimTask(PushTask task) throws InterruptedException {
+      private void reclaimTask(DataTask task) throws InterruptedException {
         idleLock.lockInterruptibly();
         try {
           idleQueue.put(task);
@@ -109,11 +119,11 @@ public class DataPusher {
       public void run() {
         while (!terminated && exception.get() == null) {
           try {
-            PushTask task = workingQueue.poll(WAIT_TIME_NANOS, TimeUnit.NANOSECONDS);
+            DataTask task = workingQueue.poll(WAIT_TIME_NANOS, TimeUnit.NANOSECONDS);
             if (task == null) {
               continue;
             }
-            pushData(task);
+            processData(task);
             reclaimTask(task);
           } catch (InterruptedException e) {
             exception.set(new IOException(e));
@@ -127,7 +137,7 @@ public class DataPusher {
 
   public void addTask(int partitionId, byte[] buffer, int size) throws IOException {
     try {
-      PushTask task = null;
+      DataTask task = null;
       while (task == null) {
         checkException();
         task = idleQueue.poll(WAIT_TIME_NANOS, TimeUnit.NANOSECONDS);
@@ -146,8 +156,28 @@ public class DataPusher {
     }
   }
 
+  private void addFlushTask() throws IOException {
+    try {
+      DataTask task = null;
+      while (task == null) {
+        checkException();
+        task = idleQueue.poll(WAIT_TIME_NANOS, TimeUnit.NANOSECONDS);
+      }
+      task = FlushTask;
+      while (!workingQueue.offer(task, WAIT_TIME_NANOS, TimeUnit.NANOSECONDS)) {
+        checkException();
+      }
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      IOException ioe = new IOException(e);
+      exception.set(ioe);
+      throw ioe;
+    }
+  }
+
   public void waitOnTermination() throws IOException {
     try {
+      addFlushTask();
       idleLock.lockInterruptibly();
       waitIdleQueueFullWithLock();
     } catch (InterruptedException e) {
@@ -156,6 +186,7 @@ public class DataPusher {
     }
 
     terminated = true;
+    compositeBuffers.clear();
     idleQueue.clear();
     workingQueue.clear();
     checkException();
@@ -167,21 +198,70 @@ public class DataPusher {
     }
   }
 
-  private void pushData(PushTask task) throws IOException {
-    int bytesWritten = client.pushData(
+  private void processData(DataTask task) throws IOException {
+    if (task.equals(FlushTask)) {
+      flush();
+      return;
+    }
+
+    int partitionId = task.getPartitionId();
+    byte[] data = task.getBuffer();
+    CompositeBuffer compositeBuf = compositeBuffers.computeIfAbsent(partitionId,
+      (s) -> new CompositeBuffer());
+
+    CompressedBuffer compressData = client.compressData(shuffleId, mapId, attemptId,
+      data, 0, task.getSize());
+    int bytesWritten = compressData.getSize();
+    compositeBuf.add(compressData);
+    totalCompositeSize.add(bytesWritten);
+    afterPush.accept(bytesWritten);
+    mapStatusLengths[task.getPartitionId()].add(bytesWritten);
+
+    if (compositeBuf.getSize() > SEND_BUFFER_SIZE) {
+      int bufferSize = compositeBuf.getSize();
+      client.pushData(
         appId,
         shuffleId,
         mapId,
         attemptId,
-        task.getPartitionId(),
-        task.getBuffer(),
+        partitionId,
         0,
-        task.getSize(),
+        bufferSize,
         numMappers,
-        numPartitions
-    );
-    afterPush.accept(bytesWritten);
-    mapStatusLengths[task.getPartitionId()].add(bytesWritten);
+        numPartitions,
+        true,
+        compositeBuf.toArray()
+      );
+      totalCompositeSize.add(-1 * bufferSize);
+    }
+
+    if (totalCompositeSize.sum() > MAX_COMPOSITE_SIZE) {
+      flush();
+    }
+  }
+
+  private void flush() throws IOException {
+    for (Map.Entry<Integer, CompositeBuffer> entry : compositeBuffers.entrySet()) {
+      int partitionId = entry.getKey();
+      CompositeBuffer compositeBuffer = entry.getValue();
+      int bufferSize = compositeBuffer.getSize();
+      if (bufferSize > 0) {
+        client.pushData(
+          appId,
+          shuffleId,
+          mapId,
+          attemptId,
+          partitionId,
+          0,
+          bufferSize,
+          numMappers,
+          numPartitions,
+          true,
+          compositeBuffer.toArray()
+        );
+      }
+    }
+    totalCompositeSize.reset();
   }
 
   private void waitIdleQueueFullWithLock() {

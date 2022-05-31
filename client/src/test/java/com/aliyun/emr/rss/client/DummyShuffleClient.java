@@ -27,6 +27,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.aliyun.emr.rss.client.read.RssInputStream;
+import com.aliyun.emr.rss.client.write.CompressedBuffer;
 import com.aliyun.emr.rss.common.rpc.RpcEndpointRef;
 
 public class DummyShuffleClient extends ShuffleClient {
@@ -52,13 +53,31 @@ public class DummyShuffleClient extends ShuffleClient {
       int mapId,
       int attemptId,
       int reduceId,
-      byte[] data,
       int offset,
       int length,
       int numMappers,
-      int numPartitions) throws IOException {
-    os.write(data, offset, length);
+      int numPartitions,
+      boolean compressed,
+      byte[]... data) throws IOException {
+    if (compressed) {
+      for (byte[] bytes : data) {
+        os.write(bytes);
+      }
+    } else {
+      os.write(data[0], offset, length);
+    }
     return length;
+  }
+
+  @Override
+  public CompressedBuffer compressData(
+      int shuffleId,
+      int mapId,
+      int attemptId,
+      byte[] data,
+      int offset,
+      int length) {
+    return new CompressedBuffer(data, length);
   }
 
   @Override

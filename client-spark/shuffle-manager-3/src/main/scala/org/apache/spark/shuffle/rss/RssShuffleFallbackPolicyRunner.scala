@@ -17,10 +17,9 @@
 
 package org.apache.spark.shuffle.rss
 
-import org.apache.spark.{ShuffleDependency, SparkConf}
-import org.apache.spark.sql.internal.SQLConf
+import org.apache.spark.SparkConf
 
-import com.aliyun.emr.rss.client.write.LifecycleManager
+import com.aliyun.emr.rss.client.LifecycleManager
 import com.aliyun.emr.rss.common.RssConf
 import com.aliyun.emr.rss.common.internal.Logging
 

@@ -261,11 +261,12 @@ public class HashBasedShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
         mapId,
         taskContext.attemptNumber(),
         partitionId,
-        buffer,
         0,
         numBytes,
         numMappers,
-        numPartitions
+        numPartitions,
+        false,
+        buffer
     );
     mapStatusLengths[partitionId].add(bytesWritten);
     writeMetrics.incBytesWritten(bytesWritten);

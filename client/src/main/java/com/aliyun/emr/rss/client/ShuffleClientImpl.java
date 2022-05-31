@@ -44,6 +44,7 @@ import org.slf4j.LoggerFactory;
 
 import com.aliyun.emr.rss.client.compress.RssLz4Compressor;
 import com.aliyun.emr.rss.client.read.RssInputStream;
+import com.aliyun.emr.rss.client.write.CompressedBuffer;
 import com.aliyun.emr.rss.client.write.DataBatches;
 import com.aliyun.emr.rss.client.write.PushState;
 import com.aliyun.emr.rss.common.RssConf;
@@ -161,12 +162,12 @@ public class ShuffleClientImpl extends ShuffleClient {
       int shuffleId,
       int mapId,
       int attemptId,
-      byte[] body,
       int batchId,
       PartitionLocation loc,
       RpcResponseCallback callback,
       PushState pushState,
-      StatusCode cause) {
+      StatusCode cause,
+      byte[]... body) {
     int reduceId = loc.getReduceId();
     if (!revive(applicationId, shuffleId, mapId, attemptId,
             reduceId, loc.getEpoch(), loc, cause)) {
@@ -388,12 +389,13 @@ public class ShuffleClientImpl extends ShuffleClient {
       int mapId,
       int attemptId,
       int reduceId,
-      byte[] data,
       int offset,
       int length,
       int numMappers,
       int numPartitions,
-      boolean doPush) throws IOException {
+      boolean doPush,
+      boolean compressed,
+      byte[]... data) throws IOException {
     // mapKey
     final String mapKey = Utils.makeMapKey(shuffleId, mapId, attemptId);
     final String shuffleKey = Utils.makeShuffleKey(applicationId, shuffleId);
@@ -443,21 +445,17 @@ public class ShuffleClientImpl extends ShuffleClient {
     PushState pushState = pushStates.computeIfAbsent(mapKey, (s) -> new PushState(conf));
 
     // increment batchId
-    final int nextBatchId = pushState.batchId.addAndGet(1);
-
-    // compress data
-    final RssLz4Compressor compressor = lz4CompressorThreadLocal.get();
-    compressor.compress(data, offset, length);
-
-    final int compressedTotalSize = compressor.getCompressedTotalSize();
-    final int BATCH_HEADER_SIZE = 4 * 4;
-    final byte[] body = new byte[BATCH_HEADER_SIZE + compressedTotalSize];
-    Platform.putInt(body, Platform.BYTE_ARRAY_OFFSET, mapId);
-    Platform.putInt(body, Platform.BYTE_ARRAY_OFFSET + 4, attemptId);
-    Platform.putInt(body, Platform.BYTE_ARRAY_OFFSET + 8, nextBatchId);
-    Platform.putInt(body, Platform.BYTE_ARRAY_OFFSET + 12, compressedTotalSize);
-    System.arraycopy(compressor.getCompressedBuffer(), 0, body, BATCH_HEADER_SIZE,
-        compressedTotalSize);
+    int dataSize = 0 ;
+    int nextBatchId = pushState.batchId.incrementAndGet();
+    byte[][] body = new byte[1][];
+    if (!compressed) {
+      CompressedBuffer compressedBuffer = compressData(shuffleId, mapId, attemptId,
+        data[0], offset, length);
+      body[0] = compressedBuffer.getBuffer();
+      dataSize = compressedBuffer.getSize();
+    } else {
+      body = data;
+    }
 
     if (doPush) {
       logger.debug("Do push data for app {} shuffle {} map {} attempt {} reduce {} batch {}.",
@@ -470,6 +468,8 @@ public class ShuffleClientImpl extends ShuffleClient {
 
       // build PushData request
       NettyManagedBuffer buffer = new NettyManagedBuffer(Unpooled.wrappedBuffer(body));
+      dataSize = (int) buffer.size();
+
       PushData pushData = new PushData(MASTER_MODE, shuffleKey, loc.getUniqueId(), buffer);
 
       // build callback
@@ -496,6 +496,7 @@ public class ShuffleClientImpl extends ShuffleClient {
         }
       };
 
+      byte[][] finalBody = body;
       RpcResponseCallback wrappedCallback = new RpcResponseCallback() {
         @Override
         public void onSuccess(ByteBuffer response) {
@@ -511,8 +512,8 @@ public class ShuffleClientImpl extends ShuffleClient {
               logger.debug("Push data split for map {} attempt {} batch {}.",
                 mapId, attemptId, nextBatchId);
               pushDataRetryPool.submit(() -> submitRetryPushData(applicationId, shuffleId, mapId,
-                attemptId, body, nextBatchId, loc, this, pushState,
-                StatusCode.HardSplit));
+                attemptId, nextBatchId, loc, this, pushState,
+                StatusCode.HardSplit, finalBody));
             }
           } else {
             response.rewind();
@@ -528,8 +529,8 @@ public class ShuffleClientImpl extends ShuffleClient {
           // async retry push data
           if (!mapperEnded(shuffleId, mapId, attemptId)) {
             pushDataRetryPool.submit(() ->
-                submitRetryPushData(applicationId, shuffleId, mapId, attemptId, body,
-                    nextBatchId, loc, callback, pushState, getPushDataFailCause(e.getMessage())));
+                submitRetryPushData(applicationId, shuffleId, mapId, attemptId, nextBatchId, loc,
+                  callback, pushState, getPushDataFailCause(e.getMessage()), finalBody));
           } else {
             pushState.inFlightBatches.remove(nextBatchId);
             logger.info("Mapper shuffleId:{} mapId:{} attempt:{} already ended," +
@@ -554,7 +555,7 @@ public class ShuffleClientImpl extends ShuffleClient {
       // add batch data
       logger.debug("Merge batch {}.", nextBatchId);
       String addressPair = genAddressPair(loc);
-      boolean shoudPush = pushState.addBatchData(addressPair, loc, nextBatchId, body);
+      boolean shoudPush = pushState.addBatchData(addressPair, loc, nextBatchId, body[0]);
       if (shoudPush) {
         limitMaxInFlight(mapKey, pushState, maxInFlight);
         DataBatches dataBatches = pushState.takeDataBaches(addressPair);
@@ -570,7 +571,7 @@ public class ShuffleClientImpl extends ShuffleClient {
       }
     }
 
-    return body.length;
+    return dataSize;
   }
 
   private void splitPartition(int shuffleId, int reduceId, String applicationId,
@@ -600,18 +601,42 @@ public class ShuffleClientImpl extends ShuffleClient {
 
   @Override
   public int pushData(
-      String applicationId,
-      int shuffleId,
-      int mapId,
-      int attemptId,
-      int reduceId,
-      byte[] data,
-      int offset,
-      int length,
-      int numMappers,
-      int numPartitions) throws IOException {
+    String applicationId,
+    int shuffleId,
+    int mapId,
+    int attemptId,
+    int reduceId,
+    int offset,
+    int length,
+    int numMappers,
+    int numPartitions,
+    boolean compressed,
+    byte[]... data) throws IOException {
     return pushOrMergeData(applicationId, shuffleId, mapId, attemptId, reduceId,
-        data, offset, length, numMappers, numPartitions, true);
+      offset, length, numMappers, numPartitions, true, compressed, data);
+  }
+
+  @Override
+  public CompressedBuffer compressData(int shuffleId, int mapId, int attemptId, byte[] data,
+                                       int offset, int length) {
+    final String mapKey = Utils.makeMapKey(shuffleId, mapId, attemptId);
+    PushState pushState = pushStates.computeIfAbsent(mapKey, (s) -> new PushState(conf));
+    // increment batchId
+    final int nextBatchId = pushState.batchId.addAndGet(1);
+
+    final RssLz4Compressor compressor = lz4CompressorThreadLocal.get();
+    compressor.compress(data, offset, length);
+
+    final int compressedTotalSize = compressor.getCompressedTotalSize();
+    final int BATCH_HEADER_SIZE = 4 * 4;
+    final byte[] body = new byte[BATCH_HEADER_SIZE + compressedTotalSize];
+    Platform.putInt(body, Platform.BYTE_ARRAY_OFFSET, mapId);
+    Platform.putInt(body, Platform.BYTE_ARRAY_OFFSET + 4, attemptId);
+    Platform.putInt(body, Platform.BYTE_ARRAY_OFFSET + 8, nextBatchId);
+    Platform.putInt(body, Platform.BYTE_ARRAY_OFFSET + 12, compressedTotalSize);
+    System.arraycopy(compressor.getCompressedBuffer(), 0, body, BATCH_HEADER_SIZE,
+      compressedTotalSize);
+    return new CompressedBuffer(body, body.length);
   }
 
   @Override
@@ -634,9 +659,10 @@ public class ShuffleClientImpl extends ShuffleClient {
       int offset,
       int length,
       int numMappers,
-      int numPartitions) throws IOException {
+      int numPartitions
+  ) throws IOException {
     return pushOrMergeData(applicationId, shuffleId, mapId, attemptId, reduceId,
-        data, offset, length, numMappers, numPartitions, false);
+      offset, length, numMappers, numPartitions, false, false, data);
   }
 
   public void pushMergedData(

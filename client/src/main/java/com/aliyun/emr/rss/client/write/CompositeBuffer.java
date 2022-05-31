@@ -17,34 +17,41 @@
 
 package com.aliyun.emr.rss.client.write;
 
-public class PushTask {
-  private int partitionId;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+public class CompositeBuffer {
+  private List list;
   private int size;
 
-  private byte[] buffer;
-
-  public PushTask(int bufferSize) {
-    this.buffer = new byte[bufferSize];
+  public CompositeBuffer() {
+    list = new ArrayList();
   }
 
-  public int getPartitionId() {
-    return partitionId;
-  }
-  public void setPartitionId(int partitionId) {
-    this.partitionId = partitionId;
+  public void add(CompressedBuffer compressedBuffer) {
+    if (compressedBuffer.getSize() == compressedBuffer.getBuffer().length) {
+      list.add(compressedBuffer.getBuffer());
+      size += compressedBuffer.getSize();
+    } else {
+      byte[] tmpBytes = Arrays.copyOfRange(compressedBuffer.getBuffer(),
+        0, compressedBuffer.getSize());
+      list.add(tmpBytes);
+      size += compressedBuffer.getSize();
+    }
   }
 
   public int getSize() {
     return size;
   }
-  public void setSize(int size) {
-    if (size > buffer.length) {
-      buffer = new byte[size];
-    }
-    this.size = size;
-  }
 
-  public byte[] getBuffer() {
-    return buffer;
+  public byte[][] toArray() {
+    byte[][] tmp = new byte[list.size()][];
+    for (int i = 0; i < list.size(); i++) {
+      tmp[i] = (byte[]) list.get(i);
+    }
+    list.clear();
+    size = 0;
+    return tmp;
   }
 }

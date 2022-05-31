@@ -18,9 +18,8 @@
 package org.apache.spark.shuffle.rss
 
 import org.apache.spark.SparkConf
-import org.apache.spark.sql.internal.SQLConf
 
-import com.aliyun.emr.rss.client.write.LifecycleManager
+import com.aliyun.emr.rss.client.LifecycleManager
 import com.aliyun.emr.rss.common.RssConf
 import com.aliyun.emr.rss.common.internal.Logging
 

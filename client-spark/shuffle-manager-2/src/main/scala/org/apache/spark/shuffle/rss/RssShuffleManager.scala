@@ -18,7 +18,6 @@
 package org.apache.spark.shuffle.rss
 
 import java.lang.reflect.Method
-import java.util.concurrent.atomic.LongAdder
 
 import io.netty.util.internal.ConcurrentSet
 import org.apache.spark._
@@ -26,8 +25,8 @@ import org.apache.spark.shuffle._
 import org.apache.spark.shuffle.sort.SortShuffleManager
 import org.apache.spark.util.Utils
 
+import com.aliyun.emr.rss.client.LifecycleManager
 import com.aliyun.emr.rss.client.ShuffleClient
-import com.aliyun.emr.rss.client.write.LifecycleManager
 import com.aliyun.emr.rss.common.RssConf
 import com.aliyun.emr.rss.common.internal.Logging
 

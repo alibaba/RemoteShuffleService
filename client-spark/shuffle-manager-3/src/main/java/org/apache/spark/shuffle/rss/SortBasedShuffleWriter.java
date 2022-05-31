@@ -234,16 +234,17 @@ public class SortBasedShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
     logger.info("Push giant record, size {}.", numBytes);
     long pushStartTime = System.nanoTime();
     int bytesWritten = rssShuffleClient.pushData(
-        appId,
-        shuffleId,
-        mapId,
-        taskContext.attemptNumber(),
-        partitionId,
-        buffer,
-        0,
-        numBytes,
-        numMappers,
-        numPartitions
+      appId,
+      shuffleId,
+      mapId,
+      taskContext.attemptNumber(),
+      partitionId,
+      0,
+      numBytes,
+      numMappers,
+      numPartitions,
+      false,
+      buffer
     );
     mapStatusLengths[partitionId].add(bytesWritten);
     writeMetrics.incBytesWritten(bytesWritten);

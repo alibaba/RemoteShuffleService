@@ -604,6 +604,7 @@ private[deploy] class Worker(
     val body = pushData.body.asInstanceOf[NettyManagedBuffer].getBuf
     val isMaster = mode == PartitionLocation.Mode.Master
     val bodySize = pushData.body().size()
+    logDebug(s"[handlePushData] receive pushdata size :${bodySize}")
 
     val key = s"${pushData.requestId}"
     if (isMaster) {
@@ -741,6 +742,7 @@ private[deploy] class Worker(
     val body = pushMergedData.body.asInstanceOf[NettyManagedBuffer].getBuf
     val isMaster = mode == PartitionLocation.Mode.Master
     val bodySize = pushMergedData.body().size()
+    logDebug(s"[handlePushMergedData] receive pushmergeddata size :${bodySize}")
 
     val key = s"${pushMergedData.requestId}"
     if (isMaster) {

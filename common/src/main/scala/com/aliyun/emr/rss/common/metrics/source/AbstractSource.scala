@@ -284,7 +284,7 @@ abstract class AbstractSource(essConf: RssConf, role: String)
     gauges().foreach(g => recordGauge(g))
     histograms().foreach(h => {
       recordHistogram(h)
-      h.asInstanceOf[RssHistogram].reservoir
+      h.histogram.asInstanceOf[RssHistogram].reservoir
         .asInstanceOf[ResettableSlidingWindowReservoir].reset()
     })
     timers().foreach(t => {
@@ -311,6 +311,13 @@ abstract class AbstractSource(essConf: RssConf, role: String)
   }
 
   val label = s"""{role="$role"}"""
+}
+
+class HistogramSupplier(val slidingWislidingWindowSize: Int)
+  extends MetricRegistry.MetricSupplier[Histogram] {
+  override def newMetric(): Histogram = {
+    new RssHistogram(new ResettableSlidingWindowReservoir(slidingWislidingWindowSize))
+  }
 }
 
 class TimerSupplier(val slidingWindowSize: Int)

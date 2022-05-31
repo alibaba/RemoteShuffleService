@@ -20,6 +20,7 @@ package com.aliyun.emr.rss.client;
 import java.io.IOException;
 
 import com.aliyun.emr.rss.client.read.RssInputStream;
+import com.aliyun.emr.rss.client.write.CompressedBuffer;
 import com.aliyun.emr.rss.common.RssConf;
 import com.aliyun.emr.rss.common.rpc.RpcEndpointRef;
 
@@ -85,14 +86,16 @@ public abstract class ShuffleClient implements Cloneable {
 
   /**
    * 往具体的一个reduce partition里写数据
+   *
    * @param applicationId
    * @param shuffleId
-   * @param mapId taskContext.partitionId
-   * @param attemptId taskContext.attemptNumber()
+   * @param mapId         taskContext.partitionId
+   * @param attemptId     taskContext.attemptNumber()
    * @param reduceId
-   * @param data
    * @param offset
    * @param length
+   * @param compressed
+   * @param data
    */
   public abstract int pushData(
       String applicationId,
@@ -100,11 +103,21 @@ public abstract class ShuffleClient implements Cloneable {
       int mapId,
       int attemptId,
       int reduceId,
-      byte[] data,
       int offset,
       int length,
       int numMappers,
-      int numPartitions) throws IOException;
+      int numPartitions,
+      boolean compressed,
+      byte[]... data) throws IOException;
+
+  public abstract CompressedBuffer compressData(
+      int shuffleId,
+      int mapId,
+      int attemptId,
+      byte[] data,
+      int offset,
+      int length
+  );
 
   public abstract void prepareForMergeData(
       int shuffleId,

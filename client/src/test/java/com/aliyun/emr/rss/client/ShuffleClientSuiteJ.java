@@ -83,8 +83,8 @@ public class ShuffleClientSuiteJ {
     setupEnv();
 
     int pushDataLen = shuffleClient.pushData(TEST_APPLICATION_ID, TEST_SHUFFLE_ID, TEST_ATTEMPT_ID,
-      TEST_ATTEMPT_ID, TEST_REDUCRE_ID, TEST_BUF1, 0,
-      TEST_BUF1.length, 1, 1);
+      TEST_ATTEMPT_ID, TEST_REDUCRE_ID, 0, TEST_BUF1.length, 1, 1, false, TEST_BUF1
+    );
 
     RssLz4Compressor compressor = new RssLz4Compressor();
     compressor.compress(TEST_BUF1, 0, TEST_BUF1.length);
