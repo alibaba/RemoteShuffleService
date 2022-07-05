@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.aliyun</groupId>
+        <artifactId>remote-shuffle-service</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>shuffle-metrics</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <name>Aliyun Shuffle Service Shuffle Metrics</name>
+
+    <dependencies>
+        <!-- com.alibaba.middleware.metrics is a open source metrics project,
+                reference: https://github.com/alibaba/metrics -->
+        <dependency>
+            <groupId>com.alibaba.middleware</groupId>
+            <artifactId>metrics-core-api</artifactId>
+            <version>${alibaba.metrics.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.middleware</groupId>
+            <artifactId>metrics-core-impl</artifactId>
+            <version>${alibaba.metrics.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.middleware</groupId>
+            <artifactId>metrics-integration</artifactId>
+            <version>${alibaba.metrics.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.middleware</groupId>
+            <artifactId>metrics-rest</artifactId>
+            <version>${alibaba.metrics.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.middleware</groupId>
+            <artifactId>metrics-reporter</artifactId>
+            <version>${alibaba.metrics.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.aliyun</groupId>
+            <artifactId>shuffle-common</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.aliyun</groupId>
+            <artifactId>shuffle-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
+
+
+</project>
