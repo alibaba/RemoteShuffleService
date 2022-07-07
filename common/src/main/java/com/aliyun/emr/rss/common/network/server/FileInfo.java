@@ -18,31 +18,7 @@
 package com.aliyun.emr.rss.common.network.server;
 
 import java.io.File;
-import java.util.ArrayList;
-
-import org.apache.commons.lang3.StringUtils;
 
 public class FileInfo {
-  public final File file;
-  public final ArrayList<Long> chunkOffsets;
-  public final int numChunks;
-
-  public FileInfo(File file, ArrayList<Long> chunkOffsets) {
-    this.file = file;
-    this.chunkOffsets = chunkOffsets;
-    if (!chunkOffsets.isEmpty()) {
-      this.numChunks = chunkOffsets.size() - 1;
-    } else {
-      this.numChunks = 0;
-    }
-  }
-
-  @Override
-  public String toString() {
-    return "FileInfo{" +
-             "file=" + file.getAbsolutePath() +
-             ", chunkOffsets=" + StringUtils.join(this.chunkOffsets, ",") +
-             ", numChunks=" + numChunks +
-             '}';
-  }
+  public File file;
 }

@@ -17,109 +17,26 @@
 
 package com.aliyun.emr.rss.service.deploy.worker;
 
-import java.io.FileNotFoundException;
-import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import com.aliyun.emr.rss.common.exception.RssException;
-import com.aliyun.emr.rss.common.metrics.source.AbstractSource;
 import com.aliyun.emr.rss.common.network.client.RpcResponseCallback;
 import com.aliyun.emr.rss.common.network.client.TransportClient;
-import com.aliyun.emr.rss.common.network.server.FileInfo;
-import com.aliyun.emr.rss.common.network.server.ManagedBufferIterator;
-import com.aliyun.emr.rss.common.network.server.OneForOneStreamManager;
 import com.aliyun.emr.rss.common.network.server.RpcHandler;
 import com.aliyun.emr.rss.common.network.server.StreamManager;
 import com.aliyun.emr.rss.common.network.util.TransportConf;
 
 public final class ChunkFetchRpcHandler extends RpcHandler {
-
-  private static final Logger logger = LoggerFactory.getLogger(ChunkFetchRpcHandler.class);
-
-  private final TransportConf conf;
-  private final OpenStreamHandler handler;
-  private final OneForOneStreamManager streamManager;
-  private final AbstractSource source; // metrics
-
-  public ChunkFetchRpcHandler(TransportConf conf, AbstractSource source, OpenStreamHandler handler
-  ) {
-    this.conf = conf;
-    this.handler = handler;
-    this.streamManager = new OneForOneStreamManager();
-    this.source = source;
+  public ChunkFetchRpcHandler(TransportConf conf, OpenStreamHandler handler) {
   }
-
-  private String readString(ByteBuffer buffer) {
-    int length = buffer.getInt();
-    byte[] bytes = new byte[length];
-    buffer.get(bytes);
-    return new String(bytes, StandardCharsets.UTF_8);
-  }
-
   @Override
   public void receive(TransportClient client, ByteBuffer message, RpcResponseCallback callback) {
-    String shuffleKey = readString(message);
-    String fileName = readString(message);
-    int startMapIndex = message.getInt();
-    int endMapIndex = message.getInt();
-
-    // metrics start
-    source.startTimer(WorkerSource.OpenStreamTime(), shuffleKey);
-    FileInfo fileInfo = handler.handleOpenStream(shuffleKey, fileName, startMapIndex, endMapIndex);
-
-    if (fileInfo != null) {
-      logger.debug("Received chunk fetch request {} {} {} {} get file info {}", shuffleKey,
-        fileName, startMapIndex, endMapIndex, fileInfo);
-      try {
-        ManagedBufferIterator iterator = new ManagedBufferIterator(fileInfo, conf);
-        long streamId = streamManager.registerStream(
-            client.getClientId(), iterator, client.getChannel());
-
-        ByteBuffer response = ByteBuffer.allocate(8 + 4);
-        response.putLong(streamId);
-        response.putInt(fileInfo.numChunks);
-        if (fileInfo.numChunks == 0) {
-          logger.debug("StreamId {} fileName {} startMapIndex {} endMapIndex {} is empty.",
-            streamId, fileName, startMapIndex, endMapIndex);
-        }
-        response.flip();
-        callback.onSuccess(response);
-      } catch (IOException e) {
-        callback.onFailure(
-            new RssException("Chunk offsets meta exception ", e));
-      } finally {
-        // metrics end
-        source.stopTimer(WorkerSource.OpenStreamTime(), shuffleKey);
-      }
-    } else {
-      // metrics end
-      source.stopTimer(WorkerSource.OpenStreamTime(), shuffleKey);
-
-      callback.onFailure(new FileNotFoundException());
-    }
-  }
-
-  @Override
-  public boolean checkRegistered() {
-    return ((Registerable) handler).isRegistered();
   }
 
   @Override
   public void channelInactive(TransportClient client) {
-    logger.debug("channel Inactive " + client.getSocketAddress());
   }
 
   @Override
   public void exceptionCaught(Throwable cause, TransportClient client) {
-    logger.debug("exception caught " + cause + " " + client.getSocketAddress());
-  }
-
-  @Override
-  public StreamManager getStreamManager() {
-    return streamManager;
   }
 }

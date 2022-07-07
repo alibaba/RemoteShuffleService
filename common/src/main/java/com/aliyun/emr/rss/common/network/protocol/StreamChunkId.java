@@ -17,7 +17,6 @@
 
 package com.aliyun.emr.rss.common.network.protocol;
 
-import com.google.common.base.Objects;
 import io.netty.buffer.ByteBuf;
 
 /**
@@ -43,31 +42,21 @@ public final class StreamChunkId implements Encodable {
   }
 
   public static StreamChunkId decode(ByteBuf buffer) {
-    assert buffer.readableBytes() >= 8 + 4;
-    long streamId = buffer.readLong();
-    int chunkIndex = buffer.readInt();
-    return new StreamChunkId(streamId, chunkIndex);
+    return null;
   }
 
   @Override
   public int hashCode() {
-    return Objects.hashCode(streamId, chunkIndex);
+    return 0;
   }
 
   @Override
   public boolean equals(Object other) {
-    if (other instanceof StreamChunkId) {
-      StreamChunkId o = (StreamChunkId) other;
-      return streamId == o.streamId && chunkIndex == o.chunkIndex;
-    }
     return false;
   }
 
   @Override
   public String toString() {
-    return Objects.toStringHelper(this)
-      .add("streamId", streamId)
-      .add("chunkIndex", chunkIndex)
-      .toString();
+    return null;
   }
 }

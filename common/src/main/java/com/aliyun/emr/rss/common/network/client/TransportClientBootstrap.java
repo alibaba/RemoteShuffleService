@@ -19,16 +19,6 @@ package com.aliyun.emr.rss.common.network.client;
 
 import io.netty.channel.Channel;
 
-/**
- * A bootstrap which is executed on a TransportClient before it is returned to the user.
- * This enables an initial exchange of information (e.g., SASL authentication tokens) on a once-per-
- * connection basis.
- *
- * Since connections (and TransportClients) are reused as much as possible, it is generally
- * reasonable to perform an expensive bootstrapping operation, as they often share a lifespan with
- * the JVM itself.
- */
 public interface TransportClientBootstrap {
-  /** Performs the bootstrapping operation, throwing an exception on failure. */
   void doBootstrap(TransportClient client, Channel channel) throws RuntimeException;
 }

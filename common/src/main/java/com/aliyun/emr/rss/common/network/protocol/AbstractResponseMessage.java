@@ -17,16 +17,8 @@
 
 package com.aliyun.emr.rss.common.network.protocol;
 
-import com.aliyun.emr.rss.common.network.buffer.ManagedBuffer;
-
 /**
  * Abstract class for response messages.
  */
 public abstract class AbstractResponseMessage extends AbstractMessage implements ResponseMessage {
-
-  protected AbstractResponseMessage(ManagedBuffer body, boolean isBodyInFrame) {
-    super(body, isBodyInFrame);
-  }
-
-  public abstract ResponseMessage createFailureResponse(String error);
 }

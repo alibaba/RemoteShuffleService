@@ -17,11 +17,9 @@
 
 package com.aliyun.emr.rss.common.network.protocol;
 
-import com.google.common.base.Objects;
 import io.netty.buffer.ByteBuf;
 
 import com.aliyun.emr.rss.common.network.buffer.ManagedBuffer;
-import com.aliyun.emr.rss.common.network.buffer.NettyManagedBuffer;
 
 public final class PushData extends AbstractMessage implements RequestMessage {
   public long requestId;
@@ -46,7 +44,6 @@ public final class PushData extends AbstractMessage implements RequestMessage {
       String shuffleKey,
       String partitionUniqueId,
       ManagedBuffer body) {
-    super(body, true);
     this.requestId = requestId;
     this.epoch = epoch;
     this.mode = mode;
@@ -61,56 +58,29 @@ public final class PushData extends AbstractMessage implements RequestMessage {
 
   @Override
   public int encodedLength() {
-    return 8 + 4 + 1 + Encoders.Strings.encodedLength(shuffleKey) +
-        Encoders.Strings.encodedLength(partitionUniqueId);
+    return 0;
   }
 
   @Override
   public void encode(ByteBuf buf) {
-    buf.writeLong(requestId);
-    buf.writeInt(epoch);
-    buf.writeByte(mode);
-    Encoders.Strings.encode(buf, shuffleKey);
-    Encoders.Strings.encode(buf, partitionUniqueId);
   }
 
   public static PushData decode(ByteBuf buf) {
-    long requestId = buf.readLong();
-    int epoch = buf.readInt();
-    byte mode = buf.readByte();
-    String shuffleKey = Encoders.Strings.decode(buf);
-    String partitionUniqueId = Encoders.Strings.decode(buf);
-    return new PushData(
-      requestId, epoch, mode, shuffleKey, partitionUniqueId, new NettyManagedBuffer(buf.retain()));
+    return null;
   }
 
   @Override
   public int hashCode() {
-    return Objects.hashCode(requestId, epoch, mode, shuffleKey, partitionUniqueId, body());
+    return 0;
   }
 
   @Override
   public boolean equals(Object other) {
-    if (other instanceof PushData) {
-      PushData o = (PushData) other;
-      return requestId == o.requestId
-          && epoch == o.epoch
-          && mode == o.mode
-          && shuffleKey.equals(o.shuffleKey)
-          && partitionUniqueId.equals((o.partitionUniqueId))
-          && super.equals(o);
-    }
     return false;
   }
 
   @Override
   public String toString() {
-    return Objects.toStringHelper(this)
-        .add("requestId", requestId)
-        .add("mode", mode)
-        .add("shuffleKey", shuffleKey)
-        .add("partitionUniqueId", partitionUniqueId)
-        .add("body size", body().size())
-        .toString();
+    return null;
   }
 }

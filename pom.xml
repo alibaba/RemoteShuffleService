@@ -54,9 +54,6 @@
   <modules>
     <module>common</module>
     <module>client</module>
-    <module>./client-spark/shuffle-manager-common</module>
-    <module>./client-spark/${rss.shuffle.manager}</module>
-    <module>server-common</module>
     <module>server-master</module>
     <module>server-worker</module>
   </modules>

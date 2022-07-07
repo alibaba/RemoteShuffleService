@@ -17,62 +17,12 @@
 
 package com.aliyun.emr.rss.client.compress;
 
-import java.util.zip.Checksum;
-
-import net.jpountz.lz4.LZ4Factory;
-import net.jpountz.lz4.LZ4FastDecompressor;
-import net.jpountz.xxhash.XXHashFactory;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 public class RssLz4Decompressor extends RssLz4Trait {
-  private static final Logger logger = LoggerFactory.getLogger(RssLz4Decompressor.class);
-  private final LZ4FastDecompressor decompressor;
-  private final Checksum checksum;
-
-  public RssLz4Decompressor() {
-    decompressor = LZ4Factory.fastestInstance().fastDecompressor();
-    checksum = XXHashFactory.fastestInstance().newStreamingHash32(DEFAULT_SEED).asChecksum();
-  }
-
   public int getOriginalLen(byte[] src) {
-    return readIntLE(src, MAGIC_LENGTH + 5);
+    return 0;
   }
 
   public int decompress(byte[] src, byte[] dst, int dstOff) {
-    int token = src[MAGIC_LENGTH] & 0xFF;
-    int compressionMethod = token & 0xF0;
-    int compressionLevel = COMPRESSION_LEVEL_BASE + (token & 0x0F);
-    int compressedLen = readIntLE(src, MAGIC_LENGTH + 1);
-    int originalLen = readIntLE(src, MAGIC_LENGTH + 5);
-    int check = readIntLE(src, MAGIC_LENGTH + 9);
-
-    switch (compressionMethod) {
-      case COMPRESSION_METHOD_RAW:
-        System.arraycopy(src, HEADER_LENGTH, dst, dstOff, originalLen);
-        break;
-      case COMPRESSION_METHOD_LZ4:
-        int compressedLen2 = decompressor.decompress(
-            src, HEADER_LENGTH, dst, dstOff, originalLen);
-        if (compressedLen != compressedLen2) {
-          logger.error("Compressed length corrupted! need {}, but {}.",
-              compressedLen, compressedLen2);
-          return -1;
-        }
-    }
-
-    checksum.reset();
-    checksum.update(dst, dstOff, originalLen);
-    if ((int) checksum.getValue() != check) {
-      logger.error("Checksum not equal! need {}, but {}.", check, checksum.getValue());
-      return -1;
-    }
-
-    return originalLen;
-  }
-
-  public static int readIntLE(byte[] buf, int i) {
-    return (buf[i] & 0xFF) | ((buf[i + 1] & 0xFF) << 8) |
-        ((buf[i + 2] & 0xFF) << 16) | ((buf[i + 3] & 0xFF) << 24);
+    return -1;
   }
 }

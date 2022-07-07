@@ -20,10 +20,6 @@ package com.aliyun.emr.rss.common.network.protocol;
 import com.google.common.base.Objects;
 import io.netty.buffer.ByteBuf;
 
-/**
- * Request to fetch a sequence of a single chunk of a stream. This will correspond to a single
- * {@link ResponseMessage} (either success or failure).
- */
 public final class ChunkFetchRequest extends AbstractMessage implements RequestMessage {
   public final StreamChunkId streamChunkId;
 
