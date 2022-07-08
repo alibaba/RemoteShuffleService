@@ -38,6 +38,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import sun.nio.ch.DirectBuffer;
 
+import com.aliyun.emr.rss.common.RssConf;
 import com.aliyun.emr.rss.common.metrics.source.AbstractSource;
 import com.aliyun.emr.rss.common.network.server.FileInfo;
 import com.aliyun.emr.rss.common.network.server.MemoryTracker;
@@ -64,6 +65,11 @@ public class PartitionFilesSorter {
     "worker-file-sorter-execute", Math.max(Runtime.getRuntime().availableProcessors(), 8), 120);
   private final Thread fileSorterSchedulerThread;
 
+  PartitionFilesSorter(MemoryTracker memoryTracker, RssConf conf, AbstractSource source) {
+    this(memoryTracker, RssConf.partitionSortTimeout(conf), RssConf.workerFetchChunkSize(conf),
+        RssConf.memoryReservedForSingleSort(conf), source);
+  }
+
   PartitionFilesSorter(MemoryTracker memoryTracker, long sortTimeOut, long fetchChunkSize,
     long reserveMemoryForSingleSort, AbstractSource source) {
     this.sortTimeout = sortTimeOut;
@@ -80,9 +86,9 @@ public class PartitionFilesSorter {
             Thread.sleep(20);
           }
           fileSorterExecutors.submit(() -> {
-            source.startTimer(WorkerSource.SortTime(), task.fileId);
+            source.startTimer(WorkerSource.SORT_TIME(), task.fileId);
             task.sort();
-            source.stopTimer(WorkerSource.SortTime(), task.fileId);
+            source.stopTimer(WorkerSource.SORT_TIME(), task.fileId);
             memoryTracker.releaseSortMemory(reserveMemoryForSingleSort);
           });
         }

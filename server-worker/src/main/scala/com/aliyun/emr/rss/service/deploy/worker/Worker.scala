@@ -20,7 +20,7 @@ package com.aliyun.emr.rss.service.deploy.worker
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.util.{ArrayList => jArrayList, HashSet => jHashSet, List => jList}
-import java.util.concurrent.{CancellationException, CompletableFuture, ConcurrentHashMap, ExecutionException, LinkedBlockingQueue, ScheduledFuture, TimeoutException, TimeUnit}
+import java.util.concurrent._
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import java.util.function.BiFunction
 
@@ -31,26 +31,26 @@ import io.netty.util.{HashedWheelTimer, Timeout, TimerTask}
 import io.netty.util.internal.ConcurrentSet
 
 import com.aliyun.emr.rss.common.RssConf
-import com.aliyun.emr.rss.common.RssConf.{memoryTrimActionThreshold, partitionSortMaxMemoryRatio, partitionSortTimeout, workerDirectMemoryPressureCheckIntervalMs, workerDirectMemoryReportIntervalSecond, workerPausePushDataRatio, workerPauseRepcaliteRatio, workerResumeRatio}
 import com.aliyun.emr.rss.common.exception.{AlreadyClosedException, RssException}
 import com.aliyun.emr.rss.common.haclient.RssHARetryClient
 import com.aliyun.emr.rss.common.internal.Logging
 import com.aliyun.emr.rss.common.meta.{PartitionLocationInfo, WorkerInfo}
 import com.aliyun.emr.rss.common.metrics.MetricsSystem
-import com.aliyun.emr.rss.common.metrics.source.{JVMCPUSource, JVMSource, NetWorkSource}
 import com.aliyun.emr.rss.common.network.TransportContext
 import com.aliyun.emr.rss.common.network.buffer.NettyManagedBuffer
-import com.aliyun.emr.rss.common.network.client.{RpcResponseCallback, TransportClientBootstrap}
+import com.aliyun.emr.rss.common.network.client.{RpcResponseCallback, TransportClientBootstrap, TransportClientFactory}
 import com.aliyun.emr.rss.common.network.protocol.{PushData, PushMergedData}
-import com.aliyun.emr.rss.common.network.server.{ChannelsLimiter, FileInfo, MemoryTracker, TransportServerBootstrap}
-import com.aliyun.emr.rss.common.protocol.{PartitionLocation, PartitionSplitMode, RpcNameConstants, TransportModuleConstants}
+import com.aliyun.emr.rss.common.network.server.{ChannelsLimiter, FileInfo, MemoryTracker, TransportServer, TransportServerBootstrap}
+import com.aliyun.emr.rss.common.protocol.{PartitionLocation, PartitionSplitMode, RpcNameConstants}
 import com.aliyun.emr.rss.common.protocol.PartitionLocation.StorageHint
+import com.aliyun.emr.rss.common.protocol.TransportModuleConstants._
 import com.aliyun.emr.rss.common.protocol.message.ControlMessages._
 import com.aliyun.emr.rss.common.protocol.message.StatusCode
 import com.aliyun.emr.rss.common.rpc._
 import com.aliyun.emr.rss.common.unsafe.Platform
 import com.aliyun.emr.rss.common.util.{ThreadUtils, Utils}
 import com.aliyun.emr.rss.server.common.http.{HttpServer, HttpServerInitializer}
+import com.aliyun.emr.rss.service.deploy.worker.WorkerSource._
 import com.aliyun.emr.rss.service.deploy.worker.http.HttpRequestHandler
 
 private[deploy] class Worker(
@@ -59,72 +59,48 @@ private[deploy] class Worker(
     val metricsSystem: MetricsSystem)
   extends RpcEndpoint with PushDataHandler with OpenStreamHandler with Registerable with Logging {
 
-  private val workerSource = {
-    val source = new WorkerSource(conf)
-    metricsSystem.registerSource(source)
-    metricsSystem.registerSource(new NetWorkSource(conf, MetricsSystem.ROLE_WOKRER))
-    metricsSystem.registerSource(new JVMSource(conf, MetricsSystem.ROLE_WOKRER))
-    metricsSystem.registerSource(new JVMCPUSource(conf, MetricsSystem.ROLE_WOKRER))
-    source
-  }
-
-  val memoryTracker = MemoryTracker.initialize(
-    workerPausePushDataRatio(conf),
-    workerPauseRepcaliteRatio(conf),
-    workerResumeRatio(conf),
-    partitionSortMaxMemoryRatio(conf),
-    workerDirectMemoryPressureCheckIntervalMs(conf),
-    workerDirectMemoryReportIntervalSecond(conf),
-    memoryTrimActionThreshold(conf))
-
+  // whether this Worker registered to Master successfully
+  private val registered = new AtomicBoolean(false)
+  private val shuffleMapperAttempts = new ConcurrentHashMap[String, Array[Int]]()
+  private val rssHARetryClient = new RssHARetryClient(rpcEnv, conf)
+  private val workerSource = new WorkerSource(conf, metricsSystem)
+  private val memoryTracker = MemoryTracker.initialize(conf)
+  private val partitionsSorter = new PartitionFilesSorter(memoryTracker, conf, workerSource)
+  private val partitionLocationInfo = new PartitionLocationInfo
   private val localStorageManager = new LocalStorageManager(conf, workerSource, this)
   memoryTracker.registerMemoryListener(localStorageManager)
 
-  private val partitionsSorter = new PartitionFilesSorter(memoryTracker,
-    partitionSortTimeout(conf),
-    RssConf.workerFetchChunkSize(conf),
-    RssConf.memoryReservedForSingleSort(conf),
-    workerSource)
+  private val defaultIOThread = localStorageManager.numDisks * 2
+  private val pushServer = createTransportServer(
+    conf, PUSH_MODULE, RssConf.pushServerPort(conf), defaultIOThread, true)
+  private val pushClientFactory = createTransportClientFactory(conf, PUSH_MODULE, defaultIOThread)
+  private val replicateServer = createTransportServer(
+    conf, REPLICATE_MODULE, RssConf.replicateServerPort(conf), defaultIOThread, true)
+  private val fetchServer = createTransportServer(
+    conf, FETCH_MODULE, RssConf.fetchServerPort(conf), defaultIOThread, false)
 
-  private val (pushServer, pushClientFactory) = {
-    val closeIdleConnections = RssConf.closeIdleConnections(conf)
-    val numThreads = conf.getInt("rss.push.io.threads", localStorageManager.numDisks * 2)
-    val transportConf = Utils.fromRssConf(conf, TransportModuleConstants.PUSH_MODULE, numThreads)
-    val rpcHandler = new PushDataRpcHandler(transportConf, this)
-    val pushServerLimiter = new ChannelsLimiter(TransportModuleConstants.PUSH_MODULE)
-    val transportContext: TransportContext =
-      new TransportContext(transportConf, rpcHandler, closeIdleConnections, workerSource,
-        pushServerLimiter)
-    val serverBootstraps = new jArrayList[TransportServerBootstrap]()
-    val clientBootstraps = new jArrayList[TransportClientBootstrap]()
-    (transportContext.createServer(RssConf.pushServerPort(conf), serverBootstraps),
-      transportContext.createClientFactory(clientBootstraps))
-  }
+  // Threads
+  private val forwardMessageScheduler =
+    ThreadUtils.newDaemonSingleThreadScheduledExecutor("worker-forward-message-scheduler")
+  private val replicateThreadPool =
+    ThreadUtils.newDaemonCachedThreadPool(
+      "worker-replicate-data", RssConf.workerReplicateNumThreads(conf))
+  // shared ExecutorService for flush
+  private val commitThreadPool = ThreadUtils.newDaemonCachedThreadPool(
+    "Worker-CommitFiles", RssConf.workerAsyncCommitFileThreads(conf))
+  private val asyncReplyPool = ThreadUtils.newDaemonSingleThreadScheduledExecutor("async-reply")
 
-  private val replicateServer = {
-    val closeIdleConnections = RssConf.closeIdleConnections(conf)
-    val numThreads = conf.getInt("rss.replicate.io.threads", localStorageManager.numDisks * 2)
-    val transportConf = Utils.fromRssConf(conf, TransportModuleConstants.REPLICATE_MODULE,
-      numThreads)
-    val rpcHandler = new PushDataRpcHandler(transportConf, this)
-    val replicateLimiter = new ChannelsLimiter(TransportModuleConstants.REPLICATE_MODULE)
-    val transportContext: TransportContext =
-      new TransportContext(transportConf, rpcHandler, closeIdleConnections, workerSource,
-        replicateLimiter)
-    val serverBootstraps = new jArrayList[TransportServerBootstrap]()
-    transportContext.createServer(RssConf.replicateServerPort(conf), serverBootstraps)
-  }
+  private val diskFlushTimer = new HashedWheelTimer()
+  // (workerInfo -> last connect timeout timestamp)
+  private val unavailablePeers = new ConcurrentHashMap[WorkerInfo, Long]()
 
-  private val fetchServer = {
-    val closeIdleConnections = RssConf.closeIdleConnections(conf)
-    val numThreads = conf.getInt("rss.fetch.io.threads", localStorageManager.numDisks * 2)
-    val transportConf = Utils.fromRssConf(conf, TransportModuleConstants.FETCH_MODULE, numThreads)
-    val rpcHandler = new ChunkFetchRpcHandler(transportConf, workerSource, this)
-    val transportContext: TransportContext =
-      new TransportContext(transportConf, rpcHandler, closeIdleConnections, workerSource)
-    val serverBootstraps = new jArrayList[TransportServerBootstrap]()
-    transportContext.createServer(RssConf.fetchServerPort(conf), serverBootstraps)
-  }
+  private var logAvailableFlushBuffersTask: ScheduledFuture[_] = _
+  private var heartbeater: ScheduledFuture[_] = _
+  private var fastFailTaskChecker: ScheduledFuture[_] = _
+
+  private val heartbeatIntervalMs = RssConf.workerTimeoutMs(conf) / 4
+  private val workerSlotsNum = RssConf.workerNumSlots(conf, localStorageManager.numDisks)
+  private val replicateFastFailDuration = RssConf.replicateFastFailDurationMs(conf)
 
   private val host = rpcEnv.address.host
   private val rpcPort = rpcEnv.address.port
@@ -133,65 +109,32 @@ private[deploy] class Worker(
   private val replicatePort = replicateServer.getPort
 
   Utils.checkHost(host)
-  assert(pushPort > 0)
-  assert(fetchPort > 0)
-  assert(replicatePort > 0)
-
-  // whether this Worker registered to Master succesfully
-  private val registered = new AtomicBoolean(false)
-
-  private val shuffleMapperAttempts = new ConcurrentHashMap[String, Array[Int]]()
-
-  private val rssHARetryClient = new RssHARetryClient(rpcEnv, conf)
+  assert(pushPort > 0, s"Worker push port should > 0, current port is $pushPort.")
+  assert(fetchPort > 0, s"Worker fetch port should > 0, current port is $fetchPort.")
+  assert(replicatePort > 0, s"Worker replicate port should > 0, current port is $replicatePort.")
 
   // worker info
-  private val workerInfo = new WorkerInfo(host, rpcPort, pushPort, fetchPort, replicatePort,
-    RssConf.workerNumSlots(conf, localStorageManager.numDisks), self)
+  private val workerInfo = new WorkerInfo(
+    host, rpcPort, pushPort, fetchPort, replicatePort, workerSlotsNum, self)
 
-  private val partitionLocationInfo = new PartitionLocationInfo
-
-  private val replicateFastfailDuration = RssConf.replicateFastFailDurationMs(conf)
-  // (workerInfo -> last connect timeout timestamp)
-  private val unavailablePeers = new ConcurrentHashMap[WorkerInfo, Long]()
-
-  workerSource.addGauge(
-    WorkerSource.RegisteredShuffleCount, _ => partitionLocationInfo.shuffleKeySet.size())
-  workerSource.addGauge(WorkerSource.TotalSlots, _ => workerInfo.numSlots)
-  workerSource.addGauge(WorkerSource.SlotsUsed, _ => workerInfo.usedSlots())
-  workerSource.addGauge(WorkerSource.SlotsAvailable, _ => workerInfo.freeSlots())
-  workerSource.addGauge(WorkerSource.SortMemory, _ => memoryTracker.getSortMemoryCounter.get())
-  workerSource.addGauge(WorkerSource.SortingFiles, _ => partitionsSorter.getSortingCount)
-  workerSource.addGauge(WorkerSource.DiskBuffer, _ => memoryTracker.getDiskBufferCounter.get())
-  workerSource.addGauge(WorkerSource.NettyMemory, _ => memoryTracker.getNettyMemoryCounter.get())
-  workerSource.addGauge(WorkerSource.PausePushDataCount, _ => memoryTracker.getPausePushDataCounter)
-  workerSource.addGauge(WorkerSource.PausePushDataAndReplicateCount,
+  workerSource.addGauge(REGISTERED_SHUFFLE_COUNT, _ => partitionLocationInfo.shuffleKeySet.size())
+  workerSource.addGauge(TOTAL_SLOTS, _ => workerInfo.numSlots)
+  workerSource.addGauge(USED_SLOTS, _ => workerInfo.usedSlots())
+  workerSource.addGauge(AVAILABLE_SLOTS, _ => workerInfo.freeSlots())
+  workerSource.addGauge(SORT_MEMORY, _ => memoryTracker.getSortMemoryCounter.get())
+  workerSource.addGauge(SORTING_FILES, _ => partitionsSorter.getSortingCount)
+  workerSource.addGauge(DISK_BUFFER, _ => memoryTracker.getDiskBufferCounter.get())
+  workerSource.addGauge(NETTY_MEMORY, _ => memoryTracker.getNettyMemoryCounter.get())
+  workerSource.addGauge(PAUSE_PUSH_DATA_COUNT, _ => memoryTracker.getPausePushDataCounter)
+  workerSource.addGauge(PAUSE_PUSH_DATA_AND_REPLICATE_COUNT,
     _ => memoryTracker.getPausePushDataAndReplicateCounter)
-
-  // Threads
-  private val forwardMessageScheduler =
-    ThreadUtils.newDaemonSingleThreadScheduledExecutor("worker-forward-message-scheduler")
-  private val replicateThreadPool = ThreadUtils.newDaemonCachedThreadPool(
-    "worker-replicate-data", RssConf.workerReplicateNumThreads(conf))
-  private val timer = new HashedWheelTimer()
-
-  // Configs
-  private val HEARTBEAT_MILLIS = RssConf.workerTimeoutMs(conf) / 4
-
-  // shared ExecutorService for flush
-  private val commitThreadPool = ThreadUtils.newDaemonCachedThreadPool(
-    "Worker-CommitFiles", RssConf.workerAsyncCommitFileThreads(conf))
-  private val asyncReplyPool = ThreadUtils.newDaemonSingleThreadScheduledExecutor("async-reply")
-
-  private var logAvailableFlushBuffersTask: ScheduledFuture[_] = _
-  private var sendHeartbeatTask: ScheduledFuture[_] = _
-  private var checkFastfailTask: ScheduledFuture[_] = _
 
   def updateNumSlots(numSlots: Int): Unit = {
     workerInfo.setNumSlots(numSlots)
     heartBeatToMaster()
   }
 
-  def heartBeatToMaster(): Unit = {
+  private def heartBeatToMaster(): Unit = {
     val shuffleKeys = new jHashSet[String]
     shuffleKeys.addAll(partitionLocationInfo.shuffleKeySet)
     shuffleKeys.addAll(localStorageManager.shuffleKeySet())
@@ -222,38 +165,37 @@ private[deploy] class Worker(
     registerWithMaster()
 
     // start heartbeat
-    sendHeartbeatTask = forwardMessageScheduler.scheduleAtFixedRate(new Runnable {
+    heartbeater = forwardMessageScheduler.scheduleAtFixedRate(new Runnable {
       override def run(): Unit = Utils.tryLogNonFatalError {
         heartBeatToMaster()
       }
-    }, HEARTBEAT_MILLIS, HEARTBEAT_MILLIS, TimeUnit.MILLISECONDS)
+    }, heartbeatIntervalMs, heartbeatIntervalMs, TimeUnit.MILLISECONDS)
 
-    checkFastfailTask = forwardMessageScheduler.scheduleAtFixedRate(new Runnable {
+    fastFailTaskChecker = forwardMessageScheduler.scheduleAtFixedRate(new Runnable {
       override def run(): Unit = Utils.tryLogNonFatalError {
         unavailablePeers.entrySet().asScala.foreach(entry => {
-          if (System.currentTimeMillis() - entry.getValue >
-            replicateFastfailDuration) {
+          if (System.currentTimeMillis() - entry.getValue > replicateFastFailDuration) {
             unavailablePeers.remove(entry.getKey)
           }
         })
       }
-    }, 0, replicateFastfailDuration, TimeUnit.MILLISECONDS)
+    }, 0, replicateFastFailDuration, TimeUnit.MILLISECONDS)
   }
 
   override def onStop(): Unit = {
     logInfo("Stopping RSS Worker.")
 
-    if (sendHeartbeatTask != null) {
-      sendHeartbeatTask.cancel(true)
-      sendHeartbeatTask = null
+    if (heartbeater != null) {
+      heartbeater.cancel(true)
+      heartbeater = null
     }
     if (logAvailableFlushBuffersTask != null) {
       logAvailableFlushBuffersTask.cancel(true)
       logAvailableFlushBuffersTask = null
     }
-    if (checkFastfailTask != null) {
-      checkFastfailTask.cancel(true)
-      checkFastfailTask = null
+    if (fastFailTaskChecker != null) {
+      fastFailTaskChecker.cancel(true)
+      fastFailTaskChecker = null
     }
 
     forwardMessageScheduler.shutdownNow()
@@ -273,32 +215,32 @@ private[deploy] class Worker(
   }
 
   override def receiveAndReply(context: RpcCallContext): PartialFunction[Any, Unit] = {
-    case ReserveSlots(applicationId, shuffleId, masterLocations, slaveLocations, splitThreashold,
+    case ReserveSlots(applicationId, shuffleId, masterLocations, slaveLocations, splitThreshold,
     splitMode, storageHint) =>
       val shuffleKey = Utils.makeShuffleKey(applicationId, shuffleId)
-      workerSource.sample(WorkerSource.ReserveSlotsTime, shuffleKey) {
+      workerSource.sample(RESERVE_SLOTS_TIME, shuffleKey) {
         logDebug(s"Received ReserveSlots request, $shuffleKey, " +
           s"master partitions: ${masterLocations.asScala.map(_.getUniqueId).mkString(",")}; " +
           s"slave partitions: ${slaveLocations.asScala.map(_.getUniqueId).mkString(",")}.")
         handleReserveSlots(context, applicationId, shuffleId, masterLocations,
-          slaveLocations, splitThreashold, splitMode, storageHint)
+          slaveLocations, splitThreshold, splitMode, storageHint)
         logDebug(s"ReserveSlots for $shuffleKey succeed.")
       }
 
     case CommitFiles(applicationId, shuffleId, masterIds, slaveIds, mapAttempts) =>
       val shuffleKey = Utils.makeShuffleKey(applicationId, shuffleId)
-      workerSource.sample(WorkerSource.CommitFilesTime, shuffleKey) {
+      workerSource.sample(COMMIT_FILE_TIME, shuffleKey) {
         logDebug(s"Received CommitFiles request, $shuffleKey, master files" +
           s" ${masterIds.asScala.mkString(",")}; slave files ${slaveIds.asScala.mkString(",")}.")
-        val commitFilesTimeMs = Utils.timeIt({
+        val commitFilesTimeMs = Utils.timeIt {
           handleCommitFiles(context, shuffleKey, masterIds, slaveIds, mapAttempts)
-        })
+        }
         logDebug(s"Done processed CommitFiles request with shuffleKey $shuffleKey, in " +
           s"${commitFilesTimeMs}ms.")
       }
 
     case GetWorkerInfos =>
-      handleGetWorkerInfos(context)
+      handleGetWorkerInformation(context)
 
     case ThreadDump =>
       handleThreadDump(context)
@@ -325,8 +267,8 @@ private[deploy] class Worker(
     }
     val masterPartitions = new jArrayList[PartitionLocation]()
     try {
-      for (ind <- 0 until masterLocations.size()) {
-        val location = masterLocations.get(ind)
+      for (index <- 0 until masterLocations.size) {
+        val location = masterLocations.get(index)
         val writer = localStorageManager.createWriter(applicationId, shuffleId, location,
           splitThreshold, splitMode)
         masterPartitions.add(new WorkingPartition(location, writer))
@@ -335,7 +277,7 @@ private[deploy] class Worker(
       case e: Exception =>
         logError(s"CreateWriter for $shuffleKey failed.", e)
     }
-    if (masterPartitions.size() < masterLocations.size()) {
+    if (masterPartitions.size < masterLocations.size) {
       val msg = s"Not all master partition satisfied for $shuffleKey"
       logWarning(s"[handleReserveSlots] $msg, will destroy writers.")
       masterPartitions.asScala.foreach(_.asInstanceOf[WorkingPartition].getFileWriter.destroy())
@@ -345,8 +287,8 @@ private[deploy] class Worker(
 
     val slavePartitions = new jArrayList[PartitionLocation]()
     try {
-      for (ind <- 0 until slaveLocations.size()) {
-        val location = slaveLocations.get(ind)
+      for (index <- 0 until slaveLocations.size) {
+        val location = slaveLocations.get(index)
         val writer = localStorageManager.createWriter(applicationId, shuffleId,
           location, splitThreshold, splitMode)
         slavePartitions.add(new WorkingPartition(location, writer))
@@ -355,7 +297,7 @@ private[deploy] class Worker(
       case e: Exception =>
         logError(s"CreateWriter for $shuffleKey failed.", e)
     }
-    if (slavePartitions.size() < slaveLocations.size()) {
+    if (slavePartitions.size < slaveLocations.size) {
       val msg = s"Not all slave partition satisfied for $shuffleKey"
       logWarning(s"[handleReserveSlots] $msg, destroy writers.")
       masterPartitions.asScala.foreach(_.asInstanceOf[WorkingPartition].getFileWriter.destroy())
@@ -367,9 +309,9 @@ private[deploy] class Worker(
     // reserve success, update status
     partitionLocationInfo.addMasterPartitions(shuffleKey, masterPartitions)
     partitionLocationInfo.addSlavePartitions(shuffleKey, slavePartitions)
-    workerInfo.allocateSlots(shuffleKey, masterPartitions.size() + slavePartitions.size())
-    logInfo(s"Reserved ${masterPartitions.size()} master location and ${slavePartitions.size()}" +
-      s" slave location for $shuffleKey master: ${masterPartitions}\nslave: ${slavePartitions}.")
+    workerInfo.allocateSlots(shuffleKey, masterPartitions.size + slavePartitions.size)
+    logInfo(s"Reserved ${masterPartitions.size} master location and ${slavePartitions.size}" +
+      s" slave location for $shuffleKey master: $masterPartitions\nslave: $slavePartitions.")
     context.reply(ReserveSlotsResponse(StatusCode.Success))
   }
 
@@ -398,7 +340,7 @@ private[deploy] class Worker(
               }
 
               val fileWriter = location.asInstanceOf[WorkingPartition].getFileWriter
-              val bytes = fileWriter.close()
+              val bytes = fileWriter.close
               if (bytes > 0L) {
                 committedIds.add(uniqueId)
               }
@@ -488,7 +430,7 @@ private[deploy] class Worker(
       val result = new AtomicReference[CompletableFuture[Unit]]()
       val flushTimeout = RssConf.flushTimeout(conf)
 
-      val timeout = timer.newTimeout(new TimerTask {
+      val timeout = diskFlushTimer.newTimeout(new TimerTask {
         override def run(timeout: Timeout): Unit = {
           if (result.get() != null) {
             result.get().cancel(true)
@@ -582,7 +524,7 @@ private[deploy] class Worker(
     }
   }
 
-  private def handleGetWorkerInfos(context: RpcCallContext): Unit = {
+  private def handleGetWorkerInformation(context: RpcCallContext): Unit = {
     val list = new jArrayList[WorkerInfo]()
     list.add(workerInfo)
     context.reply(GetWorkerInfosResponse(StatusCode.Success, list.asScala.toList: _*))
@@ -607,13 +549,12 @@ private[deploy] class Worker(
     val mode = PartitionLocation.getMode(pushData.mode)
     val body = pushData.body.asInstanceOf[NettyManagedBuffer].getBuf
     val isMaster = mode == PartitionLocation.Mode.Master
-    val bodySize = pushData.body().size()
 
     val key = s"${pushData.requestId}"
     if (isMaster) {
-      workerSource.startTimer(WorkerSource.MasterPushDataTime, key)
+      workerSource.startTimer(MASTER_PUSH_DATA_TIME, key)
     } else {
-      workerSource.startTimer(WorkerSource.SlavePushDataTime, key)
+      workerSource.startTimer(SLAVE_PUSH_DATA_TIME, key)
     }
 
     // find FileWriter responsible for the data
@@ -626,7 +567,7 @@ private[deploy] class Worker(
     val wrappedCallback = new RpcResponseCallback() {
       override def onSuccess(response: ByteBuffer): Unit = {
         if (isMaster) {
-          workerSource.stopTimer(WorkerSource.MasterPushDataTime, key)
+          workerSource.stopTimer(MASTER_PUSH_DATA_TIME, key)
           if (response.remaining() > 0) {
             val resp = ByteBuffer.allocate(response.remaining())
             resp.put(response)
@@ -636,14 +577,14 @@ private[deploy] class Worker(
             callback.onSuccess(response)
           }
         } else {
-          workerSource.stopTimer(WorkerSource.SlavePushDataTime, key)
+          workerSource.stopTimer(SLAVE_PUSH_DATA_TIME, key)
           callback.onSuccess(response)
         }
       }
 
       override def onFailure(e: Throwable): Unit = {
         logError(s"[handlePushData.onFailure] partitionLocation: $location")
-        workerSource.incCounter(WorkerSource.PushDataFailCount)
+        workerSource.incCounter(PUSH_DATA_FAIL_COUNT)
         callback.onFailure(new Exception(StatusCode.PushDataFailSlave.getMessage(), e))
       }
     }
@@ -660,7 +601,7 @@ private[deploy] class Worker(
         val msg = s"Partition location wasn't found for task(shuffle $shuffleKey, map $mapId, " +
           s"attempt $attemptId, uniqueId ${pushData.partitionUniqueId})."
         logWarning(s"[handlePushData] $msg")
-        callback.onFailure(new Exception(StatusCode.PushDataFailPartitionNotFound.getMessage()))
+        callback.onFailure(new Exception(StatusCode.PushDataFailPartitionNotFound.getMessage))
       }
       return
     }
@@ -669,14 +610,14 @@ private[deploy] class Worker(
     if (exception != null) {
       logWarning(s"[handlePushData] fileWriter $fileWriter has Exception $exception")
       val message = if (isMaster) {
-        StatusCode.PushDataFailMain.getMessage()
+        StatusCode.PushDataFailMain.getMessage
       } else {
-        StatusCode.PushDataFailSlave.getMessage()
+        StatusCode.PushDataFailSlave.getMessage
       }
       callback.onFailure(new Exception(message, exception))
       return
     }
-    if (isMaster && fileWriter.getFileLength > fileWriter.getSplitThreshold()) {
+    if (isMaster && fileWriter.getFileLength > fileWriter.getSplitThreshold) {
       fileWriter.setSplitFlag()
       if (fileWriter.getSplitMode == PartitionSplitMode.soft) {
         callback.onSuccess(ByteBuffer.wrap(Array[Byte](StatusCode.SoftSplit.getValue)))
@@ -727,9 +668,9 @@ private[deploy] class Worker(
       case e: AlreadyClosedException =>
         fileWriter.decrementPendingWrites()
         val (mapId, attemptId) = getMapAttempt(body)
-        val endedAttempt = if (shuffleMapperAttempts.containsKey(shuffleKey)) {
+        if (shuffleMapperAttempts.containsKey(shuffleKey)) {
           shuffleMapperAttempts.get(shuffleKey)(mapId)
-        } else -1
+        }
         logWarning(s"Append data failed for task(shuffle $shuffleKey, map $mapId, attempt" +
           s" $attemptId), caused by ${e.getMessage}")
       case e: Exception =>
@@ -738,25 +679,25 @@ private[deploy] class Worker(
   }
 
   override def handlePushMergedData(
-      pushMergedData: PushMergedData, callback: RpcResponseCallback): Unit = {
+      pushMergedData: PushMergedData,
+      callback: RpcResponseCallback): Unit = {
     val shuffleKey = pushMergedData.shuffleKey
     val mode = PartitionLocation.getMode(pushMergedData.mode)
     val batchOffsets = pushMergedData.batchOffsets
     val body = pushMergedData.body.asInstanceOf[NettyManagedBuffer].getBuf
     val isMaster = mode == PartitionLocation.Mode.Master
-    val bodySize = pushMergedData.body().size()
 
     val key = s"${pushMergedData.requestId}"
     if (isMaster) {
-      workerSource.startTimer(WorkerSource.MasterPushDataTime, key)
+      workerSource.startTimer(MASTER_PUSH_DATA_TIME, key)
     } else {
-      workerSource.startTimer(WorkerSource.SlavePushDataTime, key)
+      workerSource.startTimer(SLAVE_PUSH_DATA_TIME, key)
     }
 
     val wrappedCallback = new RpcResponseCallback() {
       override def onSuccess(response: ByteBuffer): Unit = {
         if (isMaster) {
-          workerSource.stopTimer(WorkerSource.MasterPushDataTime, key)
+          workerSource.stopTimer(MASTER_PUSH_DATA_TIME, key)
           if (response.remaining() > 0) {
             val resp = ByteBuffer.allocate(response.remaining())
             resp.put(response)
@@ -766,13 +707,13 @@ private[deploy] class Worker(
             callback.onSuccess(response)
           }
         } else {
-          workerSource.stopTimer(WorkerSource.SlavePushDataTime, key)
+          workerSource.stopTimer(SLAVE_PUSH_DATA_TIME, key)
           callback.onSuccess(response)
         }
       }
 
       override def onFailure(e: Throwable): Unit = {
-        workerSource.incCounter(WorkerSource.PushDataFailCount)
+        workerSource.incCounter(PUSH_DATA_FAIL_COUNT)
         callback.onFailure(new Exception(StatusCode.PushDataFailSlave.getMessage, e))
       }
     }
@@ -810,9 +751,9 @@ private[deploy] class Worker(
       logDebug(s"[handlePushMergedData] fileWriter ${fileWriterWithException}" +
           s" has Exception $exception")
       val message = if (isMaster) {
-        StatusCode.PushDataFailMain.getMessage()
+        StatusCode.PushDataFailMain.getMessage
       } else {
-        StatusCode.PushDataFailSlave.getMessage()
+        StatusCode.PushDataFailSlave.getMessage
       }
       callback.onFailure(new Exception(message, exception))
       return
@@ -837,7 +778,7 @@ private[deploy] class Worker(
             val client = pushClientFactory.createClient(
               peer.getHost, peer.getReplicatePort, location.getReduceId)
             val newPushMergedData = new PushMergedData(
-              PartitionLocation.Mode.Slave.mode(),
+              PartitionLocation.Mode.Slave.mode,
               shuffleKey,
               pushMergedData.partitionUniqueIds,
               batchOffsets,
@@ -846,7 +787,7 @@ private[deploy] class Worker(
           } catch {
             case e: Exception =>
               pushMergedData.body().release()
-              unavailablePeers.put(peerWorker, System.currentTimeMillis())
+              unavailablePeers.put(peerWorker, System.currentTimeMillis)
               wrappedCallback.onFailure(e)
           }
         }
@@ -860,9 +801,9 @@ private[deploy] class Worker(
     var alreadyClosed = false
     while (index < fileWriters.length) {
       fileWriter = fileWriters(index)
-      val offset = body.readerIndex() + batchOffsets(index)
+      val offset = body.readerIndex + batchOffsets(index)
       val length = if (index == fileWriters.length - 1) {
-        body.readableBytes() - batchOffsets(index)
+        body.readableBytes - batchOffsets(index)
       } else {
         batchOffsets(index + 1) - batchOffsets(index)
       }
@@ -879,9 +820,9 @@ private[deploy] class Worker(
           fileWriter.decrementPendingWrites()
           alreadyClosed = true
           val (mapId, attemptId) = getMapAttempt(body)
-          val endedAttempt = if (shuffleMapperAttempts.containsKey(shuffleKey)) {
+          if (shuffleMapperAttempts.containsKey(shuffleKey)) {
             shuffleMapperAttempts.get(shuffleKey)(mapId)
-          } else -1
+          }
           logWarning(s"Append data failed for task(shuffle $shuffleKey, map $mapId, attempt" +
             s" $attemptId), caused by ${e.getMessage}")
         case e: Exception =>
@@ -891,8 +832,11 @@ private[deploy] class Worker(
     }
   }
 
-  override def handleOpenStream(shuffleKey: String, fileName: String, startMapIndex: Int,
-    endMapIndex: Int): FileInfo = {
+  override def handleOpenStream(
+      shuffleKey: String,
+      fileName: String,
+      startMapIndex: Int,
+      endMapIndex: Int): FileInfo = {
     // find FileWriter responsible for the data
     val fileWriter = localStorageManager.getWriter(shuffleKey, fileName)
     if (fileWriter eq null) {
@@ -909,12 +853,10 @@ private[deploy] class Worker(
       val rsp = try {
         rssHARetryClient.askSync[RegisterWorkerResponse](
           RegisterWorker(host, rpcPort, pushPort, fetchPort, replicatePort, workerInfo.numSlots),
-          classOf[RegisterWorkerResponse]
-        )
+          classOf[RegisterWorkerResponse])
       } catch {
         case throwable: Throwable =>
-          logWarning(s"Register worker to master failed, will retry after 2s, exception: ",
-            throwable)
+          logError(s"Register worker to master failed, will retry after 2s.", throwable)
           null
       }
       // Register successfully
@@ -965,8 +907,44 @@ private[deploy] class Worker(
     localStorageManager.cleanupExpiredShuffleKey(expiredShuffleKeys)
   }
 
-  def isRegistered(): Boolean = {
+  def isRegistered: Boolean = {
     registered.get()
+  }
+
+  private def createTransportServer(
+      conf: RssConf,
+      module: String,
+      port: Int,
+      defaultIOThreads: Int,
+      isPushDataServe: Boolean): TransportServer = {
+    val closeIdleConnections = RssConf.closeIdleConnections(conf)
+    val numThreads = conf.getInt(s"rss.$module.io.threads", defaultIOThreads)
+    val transportConf = Utils.fromRssConf(conf, module, numThreads)
+    val transportContext = if (isPushDataServe) {
+      val limiter = new ChannelsLimiter(module)
+      val rpcHandler = new PushDataRpcHandler(transportConf, this)
+      new TransportContext(transportConf, rpcHandler, closeIdleConnections, workerSource, limiter)
+    } else {
+      val rpcHandler = new ChunkFetchRpcHandler(transportConf, workerSource, this)
+      new TransportContext(transportConf, rpcHandler, closeIdleConnections, workerSource)
+    }
+    val serverBootstraps = new jArrayList[TransportServerBootstrap]()
+    transportContext.createServer(port, serverBootstraps)
+  }
+
+  private def createTransportClientFactory(
+      conf: RssConf,
+      module: String,
+      defaultIOThreads: Int): TransportClientFactory = {
+    val closeIdleConnections = RssConf.closeIdleConnections(conf)
+    val numThreads = conf.getInt(s"rss.$module.io.threads", defaultIOThreads)
+    val transportConf = Utils.fromRssConf(conf, module, numThreads)
+    val rpcHandler = new PushDataRpcHandler(transportConf, this)
+    val limiter = new ChannelsLimiter(module)
+    val transportContext = new TransportContext(
+      transportConf, rpcHandler, closeIdleConnections, workerSource, limiter)
+    val clientBootstraps = new jArrayList[TransportClientBootstrap]()
+    transportContext.createClientFactory(clientBootstraps)
   }
 }
 
@@ -982,7 +960,7 @@ private[deploy] object Worker extends Logging {
       conf.set("rss.master.address", RpcAddress.fromRssURL(workerArgs.master).toString)
     }
 
-    val metricsSystem = MetricsSystem.createMetricsSystem("worker", conf, WorkerSource.ServletPath)
+    val metricsSystem = MetricsSystem.createMetricsSystem("worker", conf, SERVLET_PATH)
 
     val rpcEnv = RpcEnv.create(
       RpcNameConstants.WORKER_SYS,
@@ -990,7 +968,7 @@ private[deploy] object Worker extends Logging {
       workerArgs.host,
       workerArgs.port,
       conf,
-      Math.max(64, Runtime.getRuntime.availableProcessors()))
+      Math.max(64, Runtime.getRuntime.availableProcessors))
     rpcEnv.setupEndpoint(RpcNameConstants.WORKER_EP, new Worker(rpcEnv, conf, metricsSystem))
 
     if (RssConf.metricsSystemEnable(conf)) {
@@ -1004,7 +982,7 @@ private[deploy] object Worker extends Logging {
           val httpServer = new HttpServer(
             new HttpServerInitializer(
               new HttpRequestHandler(metricsSystem.getPrometheusHandler)), port)
-          httpServer.start()
+          httpServer.start
           initialized = true
         } catch {
           case e: Exception =>
@@ -1015,6 +993,6 @@ private[deploy] object Worker extends Logging {
       }
     }
 
-    rpcEnv.awaitTermination()
+    rpcEnv.awaitTermination
   }
 }

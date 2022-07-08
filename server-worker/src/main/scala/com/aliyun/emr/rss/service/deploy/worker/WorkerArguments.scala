@@ -26,7 +26,6 @@ class WorkerArguments(args: Array[String], conf: RssConf) {
 
   var host = Utils.localHostName()
   var port = RssConf.workerRPCPort(conf)
-  // var master: String = null
   // for local testing.
   var master: String = null
   var propertiesFile: String = null

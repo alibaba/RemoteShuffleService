@@ -33,6 +33,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import sun.misc.VM;
 
+import com.aliyun.emr.rss.common.RssConf;
 import com.aliyun.emr.rss.common.protocol.TransportModuleConstants;
 
 public class MemoryTracker {
@@ -84,6 +85,18 @@ public class MemoryTracker {
     }
     return _INSTANCE;
   }
+
+  public static MemoryTracker initialize(RssConf conf) {
+    return initialize(
+        RssConf.workerPausePushDataRatio(conf),
+        RssConf.workerPauseRepcaliteRatio(conf),
+        RssConf.workerResumeRatio(conf),
+        RssConf.partitionSortMaxMemoryRatio(conf),
+        RssConf.workerDirectMemoryPressureCheckIntervalMs(conf),
+        RssConf.workerDirectMemoryReportIntervalSecond(conf),
+        RssConf.memoryTrimActionThreshold(conf));
+  }
+
 
   public void registerMemoryListener(MemoryTrackerListener listener) {
     synchronized (memoryTrackerListeners) {

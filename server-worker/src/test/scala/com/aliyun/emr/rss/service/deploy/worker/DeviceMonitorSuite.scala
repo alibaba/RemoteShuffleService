@@ -79,21 +79,21 @@ class DeviceMonitorSuite extends AnyFunSuite {
       assert(deviceMonitor.observedDevices.containsKey(vdaDeviceInfo))
       assert(deviceMonitor.observedDevices.containsKey(vdbDeviceInfo))
 
-      assertEquals(deviceMonitor.observedDevices.get(vdaDeviceInfo).mountInfos.size, 1)
-      assertEquals(deviceMonitor.observedDevices.get(vdbDeviceInfo).mountInfos.size, 1)
+      assertEquals(deviceMonitor.observedDevices.get(vdaDeviceInfo).mounts.size, 1)
+      assertEquals(deviceMonitor.observedDevices.get(vdbDeviceInfo).mounts.size, 1)
 
-      assertEquals(deviceMonitor.observedDevices.get(vdaDeviceInfo).mountInfos(0).mountPoint,
+      assertEquals(deviceMonitor.observedDevices.get(vdaDeviceInfo).mounts(0).mountPoint,
         "/mnt/disk1")
-      assertEquals(deviceMonitor.observedDevices.get(vdbDeviceInfo).mountInfos(0).mountPoint,
+      assertEquals(deviceMonitor.observedDevices.get(vdbDeviceInfo).mounts(0).mountPoint,
         "/mnt/disk2")
 
-      assertEquals(deviceMonitor.observedDevices.get(vdaDeviceInfo).mountInfos(0).dirInfos(0),
+      assertEquals(deviceMonitor.observedDevices.get(vdaDeviceInfo).mounts(0).mountedDirs(0),
         new File("/mnt/disk1/data1"))
-      assertEquals(deviceMonitor.observedDevices.get(vdaDeviceInfo).mountInfos(0).dirInfos(1),
+      assertEquals(deviceMonitor.observedDevices.get(vdaDeviceInfo).mounts(0).mountedDirs(1),
         new File("/mnt/disk1/data2"))
-      assertEquals(deviceMonitor.observedDevices.get(vdbDeviceInfo).mountInfos(0).dirInfos(0),
+      assertEquals(deviceMonitor.observedDevices.get(vdbDeviceInfo).mounts(0).mountedDirs(0),
         new File("/mnt/disk2/data3"))
-      assertEquals(deviceMonitor.observedDevices.get(vdbDeviceInfo).mountInfos(0).dirInfos(1),
+      assertEquals(deviceMonitor.observedDevices.get(vdbDeviceInfo).mounts(0).mountedDirs(1),
         new File("/mnt/disk2/data4"))
 
       assertEquals(deviceMonitor.observedDevices.get(vdaDeviceInfo).observers.size(), 1)

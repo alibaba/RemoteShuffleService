@@ -28,9 +28,7 @@ import com.aliyun.emr.rss.common.metrics.sink.PrometheusHttpRequestHandler
 
 @Sharable
 class HttpRequestHandler(prometheusHttpRequestHandler: PrometheusHttpRequestHandler)
-  extends SimpleChannelInboundHandler[FullHttpRequest] with Logging{
-
-  private val INVALID = "invalid"
+  extends SimpleChannelInboundHandler[FullHttpRequest] with Logging {
 
   override def channelReadComplete(ctx: ChannelHandlerContext): Unit = {
     ctx.flush()
@@ -43,8 +41,7 @@ class HttpRequestHandler(prometheusHttpRequestHandler: PrometheusHttpRequestHand
     val res = new DefaultFullHttpResponse(
       HttpVersion.HTTP_1_1,
       HttpResponseStatus.OK,
-      Unpooled.copiedBuffer(msg, CharsetUtil.UTF_8)
-    )
+      Unpooled.copiedBuffer(msg, CharsetUtil.UTF_8))
     res.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/html; charset=UTF-8");
     ctx.writeAndFlush(res).addListener(ChannelFutureListener.CLOSE);
   }

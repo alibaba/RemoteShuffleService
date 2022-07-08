@@ -309,7 +309,7 @@ public final class FileWriter extends DeviceObserver {
     String metricsName = null;
     String fileAbsPath = null;
     if (source.samplePerfCritical()) {
-      metricsName = WorkerSource.TakeBufferTime();
+      metricsName = WorkerSource.TAKE_BUFFER_TIME();
       fileAbsPath = file.getAbsolutePath();
       source.startTimer(metricsName, fileAbsPath);
     }

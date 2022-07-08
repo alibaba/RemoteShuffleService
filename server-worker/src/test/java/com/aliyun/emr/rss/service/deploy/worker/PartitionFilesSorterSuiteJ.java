@@ -34,6 +34,7 @@ import org.mockito.Mockito;
 import static org.mockito.Mockito.when;
 
 import com.aliyun.emr.rss.common.RssConf;
+import com.aliyun.emr.rss.common.metrics.MetricsSystem;
 import com.aliyun.emr.rss.common.network.server.FileInfo;
 import com.aliyun.emr.rss.common.network.server.MemoryTracker;
 import com.aliyun.emr.rss.common.unsafe.Platform;
@@ -102,7 +103,8 @@ public class PartitionFilesSorterSuiteJ {
     prepare(false);
     RssConf conf = new RssConf();
     PartitionFilesSorter partitionFilesSorter = new PartitionFilesSorter(MemoryTracker.instance(),
-      sortTimeout, CHUNK_SIZE, 1024 * 1024, new WorkerSource(conf));
+      sortTimeout, CHUNK_SIZE, 1024 * 1024, new WorkerSource(conf,
+            MetricsSystem.createMetricsSystem("worker", conf, WorkerSource.SERVLET_PATH())));
     FileInfo info = partitionFilesSorter.openStream("application-1", originFileName,
       fileWriter, 5, 10);
     Thread.sleep(1000);
@@ -117,7 +119,8 @@ public class PartitionFilesSorterSuiteJ {
     prepare(true);
     RssConf conf = new RssConf();
     PartitionFilesSorter partitionFilesSorter = new PartitionFilesSorter(MemoryTracker.instance(),
-      sortTimeout, CHUNK_SIZE, 1024 * 1024, new WorkerSource(conf));
+      sortTimeout, CHUNK_SIZE, 1024 * 1024, new WorkerSource(conf,
+        MetricsSystem.createMetricsSystem("worker", conf, WorkerSource.SERVLET_PATH())));
     FileInfo info = partitionFilesSorter.openStream("application-1", originFileName,
       fileWriter, 5, 10);
     Thread.sleep(30000);

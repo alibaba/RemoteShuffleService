@@ -103,7 +103,7 @@ trait MiniClusterFeature extends Logging {
       map.foreach(m => conf.set(m._1, m._2))
     }
 
-    val metricsSystem = MetricsSystem.createMetricsSystem("worker", conf, WorkerSource.ServletPath)
+    val metricsSystem = MetricsSystem.createMetricsSystem("worker", conf, WorkerSource.SERVLET_PATH)
 
     val workerArguments = new WorkerArguments(Array(), conf)
 

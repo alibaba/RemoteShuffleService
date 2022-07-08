@@ -68,7 +68,7 @@ public final class ChunkFetchRpcHandler extends RpcHandler {
     int endMapIndex = message.getInt();
 
     // metrics start
-    source.startTimer(WorkerSource.OpenStreamTime(), shuffleKey);
+    source.startTimer(WorkerSource.OPEN_STREAM_TIME(), shuffleKey);
     FileInfo fileInfo = handler.handleOpenStream(shuffleKey, fileName, startMapIndex, endMapIndex);
 
     if (fileInfo != null) {
@@ -93,11 +93,11 @@ public final class ChunkFetchRpcHandler extends RpcHandler {
             new RssException("Chunk offsets meta exception ", e));
       } finally {
         // metrics end
-        source.stopTimer(WorkerSource.OpenStreamTime(), shuffleKey);
+        source.stopTimer(WorkerSource.OPEN_STREAM_TIME(), shuffleKey);
       }
     } else {
       // metrics end
-      source.stopTimer(WorkerSource.OpenStreamTime(), shuffleKey);
+      source.stopTimer(WorkerSource.OPEN_STREAM_TIME(), shuffleKey);
 
       callback.onFailure(new FileNotFoundException());
     }

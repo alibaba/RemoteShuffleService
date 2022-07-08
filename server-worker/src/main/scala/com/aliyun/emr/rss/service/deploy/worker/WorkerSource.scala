@@ -20,67 +20,70 @@ package com.aliyun.emr.rss.service.deploy.worker
 import com.aliyun.emr.rss.common.RssConf
 import com.aliyun.emr.rss.common.internal.Logging
 import com.aliyun.emr.rss.common.metrics.MetricsSystem
-import com.aliyun.emr.rss.common.metrics.source.AbstractSource
+import com.aliyun.emr.rss.common.metrics.source.{AbstractSource, JVMCPUSource, JVMSource, NetWorkSource}
 
-class WorkerSource(essConf: RssConf)
-    extends AbstractSource(essConf, MetricsSystem.ROLE_WOKRER) with Logging {
+class WorkerSource(conf: RssConf, metricsSystem: MetricsSystem)
+  extends AbstractSource(conf, MetricsSystem.ROLE_WOKRER) with Logging {
   override val sourceName = "worker"
 
   import WorkerSource._
   // add counters
-  addCounter(PushDataFailCount)
+  addCounter(PUSH_DATA_FAIL_COUNT)
 
   // add Timers
-  addTimer(CommitFilesTime)
-  addTimer(ReserveSlotsTime)
-  addTimer(FlushDataTime)
-  addTimer(MasterPushDataTime)
-  addTimer(SlavePushDataTime)
+  addTimer(COMMIT_FILE_TIME)
+  addTimer(RESERVE_SLOTS_TIME)
+  addTimer(FLUSH_DATA_TIME)
+  addTimer(MASTER_PUSH_DATA_TIME)
+  addTimer(SLAVE_PUSH_DATA_TIME)
 
-  addTimer(FetchChunkTime)
-  addTimer(OpenStreamTime)
-  addTimer(TakeBufferTime)
-  addTimer(SortTime)
+  addTimer(FETCH_CHUNK_TIME)
+  addTimer(OPEN_STREAM_TIME)
+  addTimer(TAKE_BUFFER_TIME)
+  addTimer(SORT_TIME)
 
   // start cleaner thread
   startCleaner()
+
+  metricsSystem.registerSource(this)
+  metricsSystem.registerSource(new NetWorkSource(conf, MetricsSystem.ROLE_WOKRER))
+  metricsSystem.registerSource(new JVMSource(conf, MetricsSystem.ROLE_WOKRER))
+  metricsSystem.registerSource(new JVMCPUSource(conf, MetricsSystem.ROLE_WOKRER))
 }
 
 object WorkerSource {
-  val ServletPath = "/metrics/prometheus"
+  val SERVLET_PATH = "/metrics/prometheus"
 
-  val CommitFilesTime = "CommitFilesTime"
+  val COMMIT_FILE_TIME = "CommitFilesTime"
+  val RESERVE_SLOTS_TIME = "ReserveSlotsTime"
+  val FLUSH_DATA_TIME = "FlushDataTime"
+  val OPEN_STREAM_TIME = "OpenStreamTime"
+  val FETCH_CHUNK_TIME = "FetchChunkTime"
 
-  val ReserveSlotsTime = "ReserveSlotsTime"
 
-  val FlushDataTime = "FlushDataTime"
-
-  val OpenStreamTime = "OpenStreamTime"
-
-  val FetchChunkTime = "FetchChunkTime"
-
+  // push data time
+  val MASTER_PUSH_DATA_TIME = "MasterPushDataTime"
+  val SLAVE_PUSH_DATA_TIME = "SlavePushDataTime"
 
   // push data
-  val MasterPushDataTime = "MasterPushDataTime"
-  val SlavePushDataTime = "SlavePushDataTime"
-  val PushDataFailCount = "PushDataFailCount"
+  val PUSH_DATA_FAIL_COUNT = "PushDataFailCount"
+  val PAUSE_PUSH_DATA_COUNT = "PausePushData"
+  val PAUSE_PUSH_DATA_AND_REPLICATE_COUNT = "PausePushDataAndReplicate"
 
   // flush
-  val TakeBufferTime = "TakeBufferTime"
+  val TAKE_BUFFER_TIME = "TakeBufferTime"
+  val DISK_BUFFER = "DiskBuffer"
 
-  val RegisteredShuffleCount = "RegisteredShuffleCount"
+  val REGISTERED_SHUFFLE_COUNT = "RegisteredShuffleCount"
 
   // slots
-  val TotalSlots = "TotalSlots"
-  val SlotsUsed = "SlotsUsed"
-  val SlotsAvailable = "SlotsAvailable"
+  val TOTAL_SLOTS = "TotalSlots"
+  val USED_SLOTS = "SlotsUsed"
+  val AVAILABLE_SLOTS = "SlotsAvailable"
 
-  // memory
-  val NettyMemory = "NettyMemory"
-  val SortTime = "SortTime"
-  val SortMemory = "SortMemory"
-  val SortingFiles = "SortingFiles"
-  val DiskBuffer = "DiskBuffer"
-  val PausePushDataCount = "PausePushData"
-  val PausePushDataAndReplicateCount = "PausePushDataAndReplicate"
+  // memory using
+  val NETTY_MEMORY = "NettyMemory"
+  val SORT_TIME = "SortTime"
+  val SORT_MEMORY = "SortMemory"
+  val SORTING_FILES = "SortingFiles"
 }
