@@ -1,0 +1,13 @@
+.idea
+target
+tmp
+*.class
+*.iml
+*.swp
+*.jar
+*.zip
+*.log
+.DS_Store
+build-target
+!flink-rpc-akka.jar
+!shaded-flink-rpc-akka.jar
