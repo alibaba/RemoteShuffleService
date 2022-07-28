@@ -29,7 +29,6 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import static org.junit.Assert.*;
 
 import com.aliyun.emr.rss.common.network.buffer.ManagedBuffer;
 import com.aliyun.emr.rss.common.network.buffer.NioManagedBuffer;
@@ -43,6 +42,8 @@ import com.aliyun.emr.rss.common.network.server.StreamManager;
 import com.aliyun.emr.rss.common.network.server.TransportServer;
 import com.aliyun.emr.rss.common.network.util.MapConfigProvider;
 import com.aliyun.emr.rss.common.network.util.TransportConf;
+
+import static org.junit.Assert.*;
 
 /**
  * Suite which ensures that requests that go without a response for the network timeout period are

@@ -15,6 +15,7 @@ enum Type {
   WorkerHeartBeat = 18;
   RegisterWorker = 19;
   ReportWorkerFailure = 20 ;
+  UpdatePartitionSize = 21;
 }
 
 message ResourceRequest {
@@ -33,16 +34,27 @@ message ResourceRequest {
   optional ReportWorkerFailureRequest reportWorkerFailureRequest = 18;
 }
 
+message DiskInfo {
+  required string mountPoint = 1;
+  required int64 usableSpace = 2;
+  required double avgFlushTime = 3;
+  required int64 usedSlots = 4;
+}
+
 message RequestSlotsRequest {
   required string shuffleKey = 1;
-  required string hostName   = 2;
-  repeated string workerInfo = 3;
+  required string hostName = 2;
+  map<string, SlotInfo> workerAllocations = 3;
+}
+
+message SlotInfo{
+  map<string, int32> slot = 1;
 }
 
 message ReleaseSlotsRequest {
   required string shuffleKey = 1;
   repeated string workerIds = 2;
-  repeated int32 slots = 3;
+  repeated SlotInfo slots = 3;
 }
 
 message UnregisterShuffleRequest {
@@ -72,7 +84,7 @@ message WorkerHeartBeatRequest {
   required int32 pushPort = 3;
   required int32 fetchPort = 4;
   required int32 replicatePort = 5;
-  required int32 numSlots = 6;
+  map<string, DiskInfo> disks = 6;
   required int64 time = 7;
 }
 
@@ -82,7 +94,7 @@ message RegisterWorkerRequest {
   required int32 pushPort = 3;
   required int32 fetchPort = 4;
   required int32 replicatePort = 5;
-  required int32 numSlots = 6;
+  map<string, DiskInfo> disks = 6;
 }
 
 message ReportWorkerFailureRequest {

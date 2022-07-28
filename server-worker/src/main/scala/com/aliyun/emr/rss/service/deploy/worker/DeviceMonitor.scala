@@ -48,8 +48,11 @@ trait DeviceMonitor {
 
 object EmptyDeviceMonitor extends DeviceMonitor
 
-class LocalDeviceMonitor(essConf: RssConf, observer: DeviceObserver,
-                         dirs: util.ArrayList[File]) extends DeviceMonitor {
+class LocalDeviceMonitor(
+  essConf: RssConf,
+  observer: DeviceObserver,
+  deviceInfos: util.HashMap[String, DeviceInfo],
+  mountInfos: util.HashMap[String, MountInfo]) extends DeviceMonitor {
   val logger = LoggerFactory.getLogger(classOf[LocalDeviceMonitor])
 
   class ObservedDevice(val deviceInfo: DeviceInfo) {
@@ -163,17 +166,17 @@ class LocalDeviceMonitor(essConf: RssConf, observer: DeviceObserver,
 
   // (deviceName -> ObservedDevice)
   var observedDevices: util.HashMap[DeviceInfo, ObservedDevice] = _
-  // (mount filesystem -> MountInfo)
-  var mountInfos: util.HashMap[String, MountInfo] = _
 
   val diskCheckInterval = diskCheckIntervalMs(essConf)
   private val diskChecker =
     ThreadUtils.newDaemonSingleThreadScheduledExecutor("worker-disk-checker")
 
   def init(): Unit = {
-    val (deviceInfos, mountInfos) = DeviceInfo.getDeviceAndMountInfos(dirs)
-    this.mountInfos = mountInfos
     this.observedDevices = new util.HashMap[DeviceInfo, ObservedDevice]()
+    deviceInfos.asScala.filter(_._2.virtual).foreach { case (deviceName, _) =>
+      logger.warn(s"device monitor may not worker properly " +
+        s"because virtual device $deviceName exists.")
+    }
     deviceInfos.asScala.foreach(entry => {
       val observedDevice = new ObservedDevice(entry._2)
       observedDevice.addObserver(observer)
@@ -258,11 +261,14 @@ object DeviceMonitor {
   val logger = LoggerFactory.getLogger(classOf[DeviceMonitor])
   val deviceCheckThreadPool = ThreadUtils.newDaemonCachedThreadPool("device-check-thread", 5)
 
-  def createDeviceMonitor(essConf: RssConf, deviceObserver: DeviceObserver,
-                          dirs: util.ArrayList[File]): DeviceMonitor = {
+  def createDeviceMonitor(
+    rssConf: RssConf,
+    deviceObserver: DeviceObserver,
+    deviceInfos: util.HashMap[String, DeviceInfo],
+    mountInfos: util.HashMap[String, MountInfo]): DeviceMonitor = {
     try {
-      if (RssConf.deviceMonitorEnabled(essConf)) {
-        val monitor = new LocalDeviceMonitor(essConf, deviceObserver, dirs)
+      if (RssConf.deviceMonitorEnabled(rssConf)) {
+        val monitor = new LocalDeviceMonitor(rssConf, deviceObserver, deviceInfos, mountInfos)
         monitor.init()
         logger.info("Device monitor init success")
         monitor

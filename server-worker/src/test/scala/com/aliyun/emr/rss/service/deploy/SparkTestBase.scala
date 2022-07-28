@@ -30,50 +30,72 @@ import com.aliyun.emr.rss.service.deploy.master.Master
 import com.aliyun.emr.rss.service.deploy.worker.Worker
 
 trait SparkTestBase extends Logging with MiniClusterFeature {
-  val sampleSeq = (1 to 78).map(Random.alphanumeric).toList
+  val sampleSeq = (1 to 78)
+    .map(Random.alphanumeric)
+    .toList
     .map(v => (v.toUpper, Random.nextInt(12) + 1))
 
-  var tuple: (Master, RpcEnv, Worker, RpcEnv, Worker, RpcEnv, Worker,
-    RpcEnv, Thread, Thread, Thread, Thread,
-    ChannelFuture, ChannelFuture, ChannelFuture, ChannelFuture) = _
+  var tuple: (
+    Master,
+      RpcEnv,
+      Worker,
+      RpcEnv,
+      Worker,
+      RpcEnv,
+      Worker,
+      Thread,
+      Thread,
+      Thread,
+      Thread,
+      ChannelFuture) = _
 
-  def clearMiniCluster(tuple: (Master, RpcEnv, Worker, RpcEnv, Worker, RpcEnv, Worker,
-    RpcEnv, Thread, Thread, Thread, Thread,
-    ChannelFuture, ChannelFuture, ChannelFuture, ChannelFuture)): Unit = {
-    if (tuple._14.channel() != null) {
-      tuple._14.channel().close()
-    }
+  def clearMiniCluster(
+    tuple: (
+      Master,
+        RpcEnv,
+        Worker,
+        RpcEnv,
+        Worker,
+        RpcEnv,
+        Worker,
+        Thread,
+        Thread,
+        Thread,
+        Thread,
+        ChannelFuture)): Unit = {
     tuple._3.stop()
     tuple._4.shutdown()
-    if (tuple._15.channel() != null) {
-      tuple._14.channel().close()
-    }
     tuple._5.stop()
     tuple._6.shutdown()
-    if (tuple._16.channel() != null) {
-      tuple._14.channel().close()
-    }
     tuple._7.stop()
-    tuple._8.shutdown()
-    tuple._13.channel().close()
     tuple._1.stop()
     tuple._2.shutdown()
     Thread.sleep(5000L)
     tuple._9.interrupt()
     tuple._10.interrupt()
     tuple._11.interrupt()
-    tuple._12.interrupt()
   }
 
-  def setupRssMiniCluster(): (Master, RpcEnv, Worker, RpcEnv, Worker, RpcEnv, Worker,
-    RpcEnv, Thread, Thread, Thread, Thread,
-    ChannelFuture, ChannelFuture, ChannelFuture, ChannelFuture) = {
+  def setupRssMiniCluster(): (
+    Master,
+      RpcEnv,
+      Worker,
+      RpcEnv,
+      Worker,
+      RpcEnv,
+      Worker,
+      Thread,
+      Thread,
+      Thread,
+      Thread,
+      ChannelFuture
+    ) = {
     Thread.sleep(3000L)
 
     val (master, masterRpcEnv, masterMetric) = createMaster()
-    val (worker1, workerRpcEnv1, workerMetric1) = createWorker()
-    val (worker2, workerRpcEnv2, workerMetric2) = createWorker()
-    val (worker3, workerRpcEnv3, workerMetric3) = createWorker()
+    val (worker1, workerRpcEnv1) = createWorker()
+    val (worker2, workerRpcEnv2) = createWorker()
+    val (worker3, workerRpcEnv) = createWorker()
     val masterThread = runnerWrap(masterRpcEnv.awaitTermination())
     val workerThread1 = runnerWrap(worker1.init())
     val workerThread2 = runnerWrap(worker2.init())
@@ -91,9 +113,20 @@ trait SparkTestBase extends Logging with MiniClusterFeature {
     assert(worker2.isRegistered())
     assert(worker3.isRegistered())
 
-    (master, masterRpcEnv, worker1, workerRpcEnv1, worker2, workerRpcEnv2, worker3, workerRpcEnv3,
-      masterThread, workerThread1, workerThread2, workerThread3,
-      masterMetric, workerMetric1, workerMetric1, workerMetric1)
+    (
+      master,
+      masterRpcEnv,
+      worker1,
+      workerRpcEnv1,
+      worker2,
+      workerRpcEnv2,
+      worker3,
+      masterThread,
+      workerThread1,
+      workerThread2,
+      workerThread3,
+      masterMetric
+    )
   }
 
   def updateSparkConf(sparkConf: SparkConf, sort: Boolean): SparkConf = {
@@ -114,9 +147,13 @@ trait SparkTestBase extends Logging with MiniClusterFeature {
 
   def combine(sparkSession: SparkSession): collection.Map[Char, (Int, Int)] = {
     val inputRdd = sparkSession.sparkContext.parallelize(sampleSeq, 4)
-    val resultWithOutRss = inputRdd.combineByKey((k: Int) => (k, 1),
-      (acc: (Int, Int), v: Int) => (acc._1 + v, acc._2 + 1),
-      (acc1: (Int, Int), acc2: (Int, Int)) => (acc1._1 + acc2._1, acc1._2 + acc2._2)).collectAsMap()
+    val resultWithOutRss = inputRdd
+      .combineByKey(
+        (k: Int) => (k, 1),
+        (acc: (Int, Int), v: Int) => (acc._1 + v, acc._2 + 1),
+        (acc1: (Int, Int), acc2: (Int, Int)) => (acc1._1 + acc2._1, acc1._2 + acc2._2)
+      )
+      .collectAsMap()
     resultWithOutRss
   }
 
@@ -129,7 +166,7 @@ trait SparkTestBase extends Logging with MiniClusterFeature {
   def groupBy(sparkSession: SparkSession): collection.Map[Char, String] = {
     val inputRdd = sparkSession.sparkContext.parallelize(sampleSeq, 2)
     val result = inputRdd.groupByKey().sortByKey().collectAsMap()
-    result.map(k=>(k._1,k._2.toList.sorted.mkString(","))).toMap
+    result.map(k => (k._1, k._2.toList.sorted.mkString(","))).toMap
   }
 
   def runsql(sparkSession: SparkSession): Map[String, Long] = {

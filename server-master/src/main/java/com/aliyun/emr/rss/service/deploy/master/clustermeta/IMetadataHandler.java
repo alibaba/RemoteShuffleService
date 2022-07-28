@@ -20,21 +20,30 @@ package com.aliyun.emr.rss.service.deploy.master.clustermeta;
 import java.util.List;
 import java.util.Map;
 
+import com.aliyun.emr.rss.common.meta.DiskInfo;
 import com.aliyun.emr.rss.common.meta.WorkerInfo;
 
 public interface IMetadataHandler {
   void handleRequestSlots(
     String shuffleKey,
     String hostName,
-    Map<WorkerInfo, Integer> workerToAllocatedSlots,
+    Map<String, Map<String, Integer>> workerToAllocatedSlots,
     String requestId);
 
   void handleReleaseSlots(
-    String shuffleKey, List<String> workerIds, List<Integer> slots, String requestId);
+    String shuffleKey,
+    List<String> workerIds,
+    List<Map<String, Integer>> slotStrings,
+    String requestId);
 
   void handleUnRegisterShuffle(String shuffleKey, String requestId);
 
-  void handleAppHeartbeat(String appId, long time, String requestId);
+  void handleAppHeartbeat(
+    String appId,
+    long totalWritten,
+    long fileCount,
+    long time,
+    String requestId);
 
   void handleAppLost(String appId, String requestId);
 
@@ -42,10 +51,12 @@ public interface IMetadataHandler {
     String requestId);
 
   void handleWorkerHeartBeat(String host, int rpcPort, int pushPort, int fetchPort,
-    int replicatePort, int numSlots, long time, String requestId);
+    int replicatePort, Map<String, DiskInfo> disks, long time, String requestId);
 
   void handleRegisterWorker(String host, int rpcPort, int pushPort, int fetchPort,
-    int replicatePort, int numSlots, String requestId);
+    int replicatePort, Map<String,DiskInfo> disks, String requestId);
 
   void handleReportWorkerFailure(List<WorkerInfo> failedNodes, String requestId);
+
+  void handleUpdatePartitionSize();
 }

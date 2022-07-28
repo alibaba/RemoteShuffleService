@@ -71,9 +71,7 @@ object WorkerSource {
   val RegisteredShuffleCount = "RegisteredShuffleCount"
 
   // slots
-  val TotalSlots = "TotalSlots"
   val SlotsUsed = "SlotsUsed"
-  val SlotsAvailable = "SlotsAvailable"
 
   // memory
   val NettyMemory = "NettyMemory"

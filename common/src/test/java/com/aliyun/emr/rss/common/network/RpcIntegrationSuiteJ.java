@@ -29,7 +29,6 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import static org.junit.Assert.*;
 
 import com.aliyun.emr.rss.common.network.buffer.NioManagedBuffer;
 import com.aliyun.emr.rss.common.network.client.RpcResponseCallback;
@@ -41,6 +40,8 @@ import com.aliyun.emr.rss.common.network.server.TransportServer;
 import com.aliyun.emr.rss.common.network.util.JavaUtils;
 import com.aliyun.emr.rss.common.network.util.MapConfigProvider;
 import com.aliyun.emr.rss.common.network.util.TransportConf;
+
+import static org.junit.Assert.*;
 
 public class RpcIntegrationSuiteJ {
   static TransportConf conf;

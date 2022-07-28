@@ -31,12 +31,13 @@ import org.junit.Assert;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.mockito.Mockito;
-import static org.mockito.Mockito.when;
 
 import com.aliyun.emr.rss.common.RssConf;
 import com.aliyun.emr.rss.common.network.server.FileInfo;
 import com.aliyun.emr.rss.common.network.server.MemoryTracker;
 import com.aliyun.emr.rss.common.unsafe.Platform;
+
+import static org.mockito.Mockito.when;
 
 public class PartitionFilesSorterSuiteJ {
   private File shuffleFile;

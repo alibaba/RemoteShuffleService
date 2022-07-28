@@ -18,6 +18,7 @@
 package com.aliyun.emr.rss.common.meta
 
 import java.util
+import java.util.function.BiFunction
 
 import scala.collection.JavaConverters._
 
@@ -98,28 +99,34 @@ class PartitionLocationInfo {
     }
   }
 
-  def removeMasterPartitions(shuffleKey: String): Int = {
+  def removeMasterPartitions(shuffleKey: String): (util.Map[String, Integer], Integer) = {
     val uniqueIds = getAllMasterIds(shuffleKey)
     removeMasterPartitions(shuffleKey, uniqueIds)
   }
 
-  def removeSlavePartitions(shuffleKey: String): Int = {
+  def removeSlavePartitions(shuffleKey: String): (util.Map[String, Integer], Integer) = {
     val uniqueIds = getAllSlaveIds(shuffleKey)
     removeSlavePartitions(shuffleKey, uniqueIds)
   }
 
-  def removeMasterPartitions(shuffleKey: String, uniqueIds: util.Collection[String]): Int = {
+  def removeMasterPartitions(
+    shuffleKey: String,
+    uniqueIds: util.Collection[String]
+  ): (util.Map[String, Integer], Integer) = {
     removePartitions(shuffleKey, uniqueIds, masterPartitionLocations)
   }
 
-  def removeSlavePartitions(shuffleKey: String, uniqueIds: util.Collection[String]): Int = {
+  def removeSlavePartitions(
+    shuffleKey: String,
+    uniqueIds: util.Collection[String]
+  ): (util.Map[String, Integer], Integer) = {
     removePartitions(shuffleKey, uniqueIds, slavePartitionLocations)
   }
 
-  def getAllMasterLocationsWithMinEpoch(
-      shuffleKey: String): util.List[PartitionLocation] = this.synchronized {
-    getAllMasterLocationsWithExtremeEpoch(shuffleKey, (a, b) => a < b)
-  }
+  def getAllMasterLocationsWithMinEpoch(shuffleKey: String): util.List[PartitionLocation] =
+    this.synchronized {
+      getAllMasterLocationsWithExtremeEpoch(shuffleKey, (a, b) => a < b)
+    }
 
   def getAllMasterLocationsWithExtremeEpoch(
       shuffleKey: String,
@@ -196,13 +203,21 @@ class PartitionLocationInfo {
     }
   }
 
+  /**
+   *
+   * @param shuffleKey
+   * @param uniqueIds
+   * @param partitionInfo
+   * @return disk related freed slot number and total freed slots number
+   */
   private def removePartitions(
-      shuffleKey: String,
-      uniqueIds: util.Collection[String],
-      partitionInfo: PartitionInfo): Int = this.synchronized {
+    shuffleKey: String,
+    uniqueIds: util.Collection[String],
+    partitionInfo: PartitionInfo): (util.Map[String, Integer], Integer) = this.synchronized {
     if (!partitionInfo.containsKey(shuffleKey)) {
-      return 0
+      return (Map.empty[String, Integer].asJava, 0)
     }
+    val releaseMap = new util.HashMap[String, Integer]()
     var numSlotsReleased: Int = 0
     val reduceLocMap = partitionInfo.get(shuffleKey)
     uniqueIds.asScala.foreach { id =>
@@ -211,10 +226,18 @@ class PartitionLocationInfo {
       val epoch = tokens(1).toInt
       val locations = reduceLocMap.get(partitionId)
       if (locations != null) {
-        val res = locations.asScala.find(_.getEpoch == epoch).orNull
-        if (res != null) {
-          locations.remove(res)
+        val targetLocation = locations.asScala.find(_.getEpoch == epoch).orNull
+        if (targetLocation != null) {
+          locations.remove(targetLocation)
           numSlotsReleased += 1
+          releaseMap.compute(
+            targetLocation.getStorageHint.getMountPoint,
+            new BiFunction[String, Integer, Integer] {
+              override def apply(t: String, u: Integer): Integer = {
+                if (u == null) 1 else u + 1
+              }
+            }
+          )
         }
       }
       if (locations == null || locations.size() == 0) {
@@ -225,7 +248,8 @@ class PartitionLocationInfo {
     if (reduceLocMap.size() == 0) {
       partitionInfo.remove(shuffleKey)
     }
-    numSlotsReleased
+    // some locations might have no disk hint
+    (releaseMap, numSlotsReleased)
   }
 
   private def getLocation(

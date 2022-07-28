@@ -29,7 +29,6 @@ import com.google.common.io.Closeables;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import static org.junit.Assert.*;
 
 import com.aliyun.emr.rss.common.network.buffer.FileSegmentManagedBuffer;
 import com.aliyun.emr.rss.common.network.buffer.ManagedBuffer;
@@ -46,6 +45,8 @@ import com.aliyun.emr.rss.common.network.server.StreamManager;
 import com.aliyun.emr.rss.common.network.server.TransportServer;
 import com.aliyun.emr.rss.common.network.util.MapConfigProvider;
 import com.aliyun.emr.rss.common.network.util.TransportConf;
+
+import static org.junit.Assert.*;
 
 public class ChunkFetchIntegrationSuiteJ {
   static final long STREAM_ID = 1;

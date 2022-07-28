@@ -53,6 +53,12 @@ enum MessageType {
   PARTITION_SPLIT = 47;
 }
 
+message PbStorageHint {
+  int32 type = 1;
+  string mountPoint = 2;
+  bool finalResult = 3;
+}
+
 message PbPartitionLocation {
   enum Mode {
     Master = 0;
@@ -67,12 +73,19 @@ message PbPartitionLocation {
   int32 fetchPort = 7;
   int32 replicatePort = 8;
   PbPartitionLocation peer = 9;
-  int32 storageHintOrdinal = 10;
+  PbStorageHint storageHint = 10;
 }
 
 message PbWorkerResource {
   repeated PbPartitionLocation masterPartitions = 1;
   repeated PbPartitionLocation slavePartitions = 2;
+}
+
+message PbDiskInfo {
+  string mountPoint = 1;
+  int64 usableSpace = 2;
+  double avgFlushTime = 3;
+  int64 usedSlots = 4;
 }
 
 message PbWorkerInfo {
@@ -81,11 +94,11 @@ message PbWorkerInfo {
   int32 pushPort = 3;
   int32 fetchPort = 4;
   int32 replicatePort = 5;
-  int32 numSlots = 6;
+  map<string, PbDiskInfo> disks = 6;
 }
 
 message PbFileGroup {
-  repeated PbPartitionLocation localtions = 1;
+  repeated PbPartitionLocation locations = 1;
 }
 
 message PbRegisterWorker {
@@ -94,7 +107,7 @@ message PbRegisterWorker {
   int32 pushPort = 3;
   int32 fetchPort = 4;
   int32 replicatePort = 5;
-  int32 numSlots = 6;
+  map<string, PbDiskInfo> disks = 6;
   string requestId = 9;
 }
 
@@ -104,7 +117,7 @@ message PbHeartbeatFromWorker {
   int32 pushPort = 3;
   int32 fetchPort = 4;
   int32 replicatePort = 5;
-  int32 numSlots = 6;
+  map<string, PbDiskInfo> disks = 6;
   repeated string shuffleKeys = 7;
   string requestId = 8;
 }
@@ -133,13 +146,18 @@ message PbRequestSlots {
   string hostname = 4;
   bool shouldReplicate = 5;
   string requestId = 6;
+  int32 storageType = 7;
+}
+
+message PbSlotInfo{
+  map<string,int32> slot=1;
 }
 
 message PbReleaseSlots {
   string applicationId = 1;
   int32 shuffleId = 2;
   repeated string workerIds = 3;
-  repeated int32 slots = 4;
+  repeated PbSlotInfo slots = 4;
   string requestId = 6;
 }
 
@@ -220,7 +238,9 @@ message PbApplicationLostResponse {
 
 message PbHeartBeatFromApplication {
   string appId = 1;
-  string requestId = 2;
+  int64 totalWritten = 2;
+  int64 fileCount = 3 ;
+  string requestId = 4;
 }
 
 message PbGetBlacklist {
@@ -262,8 +282,7 @@ message PbReserveSlots {
   repeated PbPartitionLocation slaveLocations = 4;
   int64 splitThreshold = 5;
   int32 splitMode = 6;
-  int32 storageHintOrdinal = 7;
-  int32 partitionType = 8;
+  int32 partitionType = 7;
 }
 
 message PbReserveSlotsResponse {
@@ -285,6 +304,10 @@ message PbCommitFilesResponse {
   repeated string committedSlaveIds = 3;
   repeated string failedMasterIds = 4;
   repeated string failedSlaveIds = 5;
+  map<string, PbStorageHint> committedMasterStorageHints = 6;
+  map<string, PbStorageHint> committedSlaveStorageHints = 7;
+  int64 totalWritten = 8;
+  int32 fileCount = 9;
 }
 
 message PbDestroy {

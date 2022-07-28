@@ -18,15 +18,17 @@
 package com.aliyun.emr.rss.service.deploy
 
 import java.util.concurrent.atomic.AtomicInteger
+
 import io.netty.channel.ChannelFuture
+
 import com.aliyun.emr.rss.common.RssConf
 import com.aliyun.emr.rss.common.internal.Logging
 import com.aliyun.emr.rss.common.metrics.MetricsSystem
-import com.aliyun.emr.rss.common.rpc.RpcEnv
 import com.aliyun.emr.rss.common.protocol.RpcNameConstants
+import com.aliyun.emr.rss.common.rpc.RpcEnv
 import com.aliyun.emr.rss.server.common.http.{HttpServer, HttpServerInitializer}
 import com.aliyun.emr.rss.service.deploy.master.{Master, MasterArguments, MasterSource}
-import com.aliyun.emr.rss.service.deploy.worker.{Controller, Worker, WorkerArguments, WorkerSource}
+import com.aliyun.emr.rss.service.deploy.worker.{Worker, WorkerArguments, WorkerSource}
 
 trait MiniClusterFeature extends Logging {
   val workerPromethusPort = new AtomicInteger(12378)
@@ -51,7 +53,9 @@ trait MiniClusterFeature extends Logging {
   protected def createMaster(map: Map[String, String] = null): (Master, RpcEnv, ChannelFuture) = {
     val conf = new RssConf()
     conf.set("rss.metrics.system.enabled", "false")
-    conf.set("rss.master.prometheus.metric.port", s"${workerPromethusPort.incrementAndGet()}")
+    val prometheusPort = workerPromethusPort.getAndIncrement()
+    conf.set("rss.master.prometheus.metric.port", s"${prometheusPort}")
+    logInfo(s"set prometheus.metric.port to $prometheusPort")
     if (map != null) {
       map.foreach(m => conf.set(m._1, m._2))
     }
@@ -64,32 +68,34 @@ trait MiniClusterFeature extends Logging {
       masterArguments.host,
       masterArguments.port,
       conf,
-      4)
+      4
+    )
 
-    val metricsSystem = MetricsSystem.createMetricsSystem("master",
-      conf, MasterSource.ServletPath)
-    val master = new Master(rpcEnv, rpcEnv.address, conf, metricsSystem)
+    val metricsSystem = MetricsSystem.createMetricsSystem("master", conf, MasterSource.ServletPath)
+    val master = new Master(rpcEnv, conf, metricsSystem)
     rpcEnv.setupEndpoint(RpcNameConstants.MASTER_EP, master)
 
     val handlers = if (RssConf.metricsSystemEnable(conf)) {
       logInfo(s"Metrics system enabled.")
       metricsSystem.start()
-      new com.aliyun.emr.rss.service.deploy.master.http
-      .HttpRequestHandler(master, metricsSystem.getPrometheusHandler)
+      new com.aliyun.emr.rss.service.deploy.master.http.HttpRequestHandler(
+        master,
+        metricsSystem.getPrometheusHandler
+      )
     } else {
-      new com.aliyun.emr.rss.service.deploy.master.http
-      .HttpRequestHandler(master, null)
+      new com.aliyun.emr.rss.service.deploy.master.http.HttpRequestHandler(master, null)
     }
 
-    val httpServer = new HttpServer(new HttpServerInitializer(handlers),
-      RssConf.masterPrometheusMetricPort(conf))
+    val httpServer =
+      new HttpServer(new HttpServerInitializer(handlers), RssConf.masterPrometheusMetricPort(conf))
     val channelfuture = httpServer.start()
 
     Thread.sleep(5000L)
     (master, rpcEnv, channelfuture)
   }
 
-  protected def createWorker(map: Map[String, String] = null): (Worker, RpcEnv, ChannelFuture) = {
+  protected def createWorker(map: Map[String, String] = null): (Worker, RpcEnv) = {
+    logInfo("start create worker for mini cluster")
     val conf = new RssConf()
     conf.set("rss.worker.base.dirs", getTmpDir())
     conf.set("rss.device.monitor.enabled", "false")
@@ -100,10 +106,15 @@ trait MiniClusterFeature extends Logging {
     if (map != null) {
       map.foreach(m => conf.set(m._1, m._2))
     }
+    logInfo("rss conf created")
 
     val metricsSystem = MetricsSystem.createMetricsSystem("worker", conf, WorkerSource.ServletPath)
 
+    logInfo("metrics system created")
+
     val workerArguments = new WorkerArguments(Array(), conf)
+
+    logInfo("worker argument created")
 
     val rpcEnv = RpcEnv.create(
       RpcNameConstants.WORKER_SYS,
@@ -111,59 +122,50 @@ trait MiniClusterFeature extends Logging {
       workerArguments.host,
       workerArguments.port,
       conf,
-      4)
-    val worker = new Worker(conf, workerArguments)
+      4
+    )
 
-    var channelFuture: ChannelFuture = null
-    if (RssConf.metricsSystemEnable(conf)) {
-      logInfo(s"Metrics system enabled!")
-      metricsSystem.start()
-      var port = RssConf.workerPrometheusMetricPort(conf)
-      var initialized = false
-      while (!initialized) {
-        try {
-          val httpServer = new HttpServer(
-            new HttpServerInitializer(
-              new com.aliyun.emr.rss.service.deploy.worker.http
-              .HttpRequestHandler(metricsSystem.getPrometheusHandler)), port)
-          channelFuture = httpServer.start()
-          initialized = true
-        } catch {
-          case e: Exception =>
-            logWarning(s"HttpServer pushPort $port may already exist, try pushPort ${port + 1}.", e)
-            port += 1
-            Thread.sleep(1000)
-        }
-      }
+    logInfo("worker rpc env created")
+
+    try {
+      val worker = new Worker(conf, workerArguments)
+      logInfo("worker created for mini cluster")
+      (worker, rpcEnv)
+    } catch {
+      case e: Exception =>
+        logError("create worker failed, detail:", e)
+        System.exit(-1)
+        (null, null)
     }
-    (worker, rpcEnv, channelFuture)
   }
 
-  def setUpMiniCluster(masterConfs:Map[String,String]=null,workerConfs:Map[String,String]=null):
-  (Worker, RpcEnv, Worker, RpcEnv, Worker, RpcEnv, Worker, RpcEnv, Worker, RpcEnv) ={
+  def setUpMiniCluster(
+    masterConfs: Map[String, String] = null,
+    workerConfs: Map[String, String] = null
+  ): (Worker, RpcEnv, Worker, RpcEnv, Worker, RpcEnv, Worker, RpcEnv, Worker, RpcEnv) = {
     val (master, masterRpcEnv, masterMetric) = createMaster(masterConfs)
     val masterThread = runnerWrap(masterRpcEnv.awaitTermination())
     masterThread.start()
 
     Thread.sleep(5000L)
 
-    val (worker1, workerRpcEnv1, workerMetric1) = createWorker(workerConfs)
+    val (worker1, workerRpcEnv1) = createWorker(workerConfs)
     val workerThread1 = runnerWrap(worker1.init())
     workerThread1.start()
 
-    val (worker2, workerRpcEnv2, workerMetric2) = createWorker(workerConfs)
+    val (worker2, workerRpcEnv2) = createWorker(workerConfs)
     val workerThread2 = runnerWrap(worker2.init())
     workerThread2.start()
 
-    val (worker3, workerRpcEnv3, workerMetric3) = createWorker(workerConfs)
+    val (worker3, workerRpcEnv3) = createWorker(workerConfs)
     val workerThread3 = runnerWrap(worker3.init())
     workerThread3.start()
 
-    val (worker4, workerRpcEnv4, workerMetric4) = createWorker(workerConfs)
+    val (worker4, workerRpcEnv4) = createWorker(workerConfs)
     val workerThread4 = runnerWrap(worker4.init())
     workerThread4.start()
 
-    val (worker5, workerRpcEnv5, workerMetric5) = createWorker(workerConfs)
+    val (worker5, workerRpcEnv5) = createWorker(workerConfs)
     val workerThread5 = runnerWrap(worker5.init())
     workerThread5.start()
 
@@ -172,8 +174,20 @@ trait MiniClusterFeature extends Logging {
     assert(worker1.isRegistered())
     assert(worker2.isRegistered())
     assert(worker3.isRegistered())
+    assert(worker4.isRegistered())
+    assert(worker5.isRegistered())
 
-    (worker1,workerRpcEnv1,worker2,workerRpcEnv2,worker3,workerRpcEnv3,
-      worker4,workerRpcEnv4,worker5,workerRpcEnv5)
+    (
+      worker1,
+      workerRpcEnv1,
+      worker2,
+      workerRpcEnv2,
+      worker3,
+      workerRpcEnv3,
+      worker4,
+      workerRpcEnv4,
+      worker5,
+      workerRpcEnv5
+    )
   }
 }

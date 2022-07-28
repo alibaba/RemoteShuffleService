@@ -66,16 +66,17 @@ import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
 import com.aliyun.emr.rss.client.DummyShuffleClient;
 import com.aliyun.emr.rss.client.ShuffleClient;
 import com.aliyun.emr.rss.common.RssConf;
 import com.aliyun.emr.rss.common.network.util.JavaUtils;
 import com.aliyun.emr.rss.common.util.Utils;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class RssShuffleWriterSuiteJ {
 

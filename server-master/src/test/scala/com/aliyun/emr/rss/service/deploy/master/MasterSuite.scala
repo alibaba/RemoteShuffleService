@@ -60,7 +60,7 @@ class MasterSuite extends AnyFunSuite
       4)
 
     val metricsSystem = MetricsSystem.createMetricsSystem("master", conf, MasterSource.ServletPath)
-    val master = new Master(rpcEnv, rpcEnv.address, conf, metricsSystem)
+    val master = new Master(rpcEnv, conf, metricsSystem)
     rpcEnv.setupEndpoint(RpcNameConstants.MASTER_EP, master)
 
     val handlers = if (RssConf.metricsSystemEnable(conf)) {

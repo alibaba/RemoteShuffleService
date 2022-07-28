@@ -31,9 +31,6 @@ import org.junit.Test;
 import org.mockito.Mockito;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
 import com.aliyun.emr.rss.common.RssConf;
 import com.aliyun.emr.rss.common.exception.RssException;
@@ -44,6 +41,10 @@ import com.aliyun.emr.rss.common.protocol.message.ControlMessages.OneWayMessageR
 import com.aliyun.emr.rss.common.rpc.RpcAddress;
 import com.aliyun.emr.rss.common.rpc.RpcEndpointRef;
 import com.aliyun.emr.rss.common.rpc.RpcEnv;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class RssHARetryClientSuiteJ {
   private static final Logger LOG = LoggerFactory.getLogger(RssHARetryClientSuiteJ.class);

@@ -111,6 +111,8 @@
         <property name="separated" value="true"/>
         <property name="ordered" value="true"/>
         <property name="groups" value="/^javax?\./,scala,*,com.aliyun.emr"/>
+        <property name="option" value="bottom"/>
+        <property name="sortStaticImportsAlphabetically" value="true"/>
     </module>
 
     <module name="MethodParamPad"/>

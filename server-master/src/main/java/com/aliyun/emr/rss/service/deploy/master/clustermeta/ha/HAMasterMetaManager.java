@@ -26,7 +26,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.aliyun.emr.rss.common.RssConf;
+import com.aliyun.emr.rss.common.meta.DiskInfo;
 import com.aliyun.emr.rss.common.meta.WorkerInfo;
+import com.aliyun.emr.rss.common.protocol.message.ControlMessages;
 import com.aliyun.emr.rss.common.rpc.RpcEnv;
 import com.aliyun.emr.rss.service.deploy.master.clustermeta.AbstractMetaManager;
 import com.aliyun.emr.rss.service.deploy.master.clustermeta.MetaUtil;
@@ -42,6 +44,8 @@ public class HAMasterMetaManager extends AbstractMetaManager {
   public HAMasterMetaManager(RpcEnv rpcEnv, RssConf conf) {
     this.rpcEnv = rpcEnv;
     this.conf = conf;
+    this.defaultPartitionSize = RssConf.partitionSize(conf);
+    this.estimatedPartitionSize = defaultPartitionSize;
   }
 
   public HARaftServer getRatisServer() {
@@ -54,19 +58,19 @@ public class HAMasterMetaManager extends AbstractMetaManager {
 
   @Override
   public void handleRequestSlots(
-      String shuffleKey,
-      String hostName,
-      Map<WorkerInfo, Integer> workerToAllocatedSlots,
-      String requestId) {
+    String shuffleKey,
+    String hostName,
+    Map<String, Map<String, Integer>> workerToAllocatedSlots,
+    String requestId) {
     try {
       ResourceProtos.RequestSlotsRequest.Builder builder =
         ResourceProtos.RequestSlotsRequest.newBuilder()
               .setShuffleKey(shuffleKey)
               .setHostName(hostName);
-      for (WorkerInfo workerInfo : workerToAllocatedSlots.keySet()) {
-        builder.addWorkerInfo(WorkerInfo.encodeToPbStr(workerInfo.host(), workerInfo.rpcPort(),
-          workerInfo.pushPort(), workerInfo.fetchPort(), workerInfo.replicatePort(),
-          workerToAllocatedSlots.get(workerInfo)));
+      for (String workerUniqueId : workerToAllocatedSlots.keySet()) {
+        builder.putWorkerAllocations(workerUniqueId,
+            ResourceProtos.SlotInfo.newBuilder()
+                .putAllSlot(workerToAllocatedSlots.get(workerUniqueId)).build());
       }
       ratisServer.submitRequest(ResourceRequest.newBuilder()
           .setCmdType(Type.RequestSlots)
@@ -80,19 +84,23 @@ public class HAMasterMetaManager extends AbstractMetaManager {
 
   @Override
   public void handleReleaseSlots(String shuffleKey, List<String> workerIds,
-                                 List<Integer> slots, String requestId) {
+    List<Map<String, Integer>> slots, String requestId) {
     try {
-      ratisServer.submitRequest(ResourceRequest.newBuilder()
-          .setCmdType(Type.ReleaseSlots)
-          .setRequestId(requestId)
-          .setReleaseSlotsRequest(
-            ResourceProtos.ReleaseSlotsRequest.newBuilder()
-                          .setShuffleKey(shuffleKey)
-                          .addAllWorkerIds(workerIds)
-                          .addAllSlots(slots)
-                          .build())
+      ratisServer.submitRequest(
+          ResourceRequest.newBuilder()
+              .setCmdType(Type.ReleaseSlots)
+              .setRequestId(requestId)
+              .setReleaseSlotsRequest(
+                  ResourceProtos.ReleaseSlotsRequest.newBuilder()
+                      .setShuffleKey(shuffleKey)
+                      .addAllWorkerIds(workerIds)
+                      .addAllSlots(
+                          slots.stream()
+                              .map(slot -> ResourceProtos.SlotInfo.newBuilder()
+                                  .putAllSlot(slot).build())
+                              .collect(Collectors.toList()))
+                      .build())
               .build());
-
     } catch (ServiceException e) {
       LOG.error("Handle release slots for {} failed!", shuffleKey, e);
     }
@@ -115,16 +123,22 @@ public class HAMasterMetaManager extends AbstractMetaManager {
   }
 
   @Override
-  public void handleAppHeartbeat(String appId, long time, String requestId) {
+  public void handleAppHeartbeat(
+    String appId,
+    long totalWritten,
+    long fileCount,
+    long time,
+    String requestId) {
     try {
-      ratisServer.submitRequest(ResourceRequest.newBuilder()
-          .setCmdType(Type.AppHeartBeat)
-          .setRequestId(requestId)
-          .setAppHeartbeatRequest(
-            ResourceProtos.AppHeartbeatRequest.newBuilder()
-                  .setAppId(appId).setTime(time)
-                  .build())
-          .build());
+      ratisServer.submitRequest(
+          ResourceRequest.newBuilder()
+              .setCmdType(Type.AppHeartBeat)
+              .setRequestId(requestId)
+              .setAppHeartbeatRequest(
+                  ResourceProtos.AppHeartbeatRequest.newBuilder()
+                      .setAppId(appId).setTime(time)
+                      .build())
+              .build());
     } catch (ServiceException e) {
       LOG.error("Handle heart beat for {} failed!", appId, e);
     }
@@ -169,7 +183,7 @@ public class HAMasterMetaManager extends AbstractMetaManager {
 
   @Override
   public void handleWorkerHeartBeat(String host, int rpcPort, int pushPort, int fetchPort,
-    int replicatePort, int numSlots, long time, String requestId) {
+    int replicatePort, Map<String, DiskInfo> disks, long time, String requestId) {
     try {
       ratisServer.submitRequest(ResourceRequest.newBuilder()
               .setCmdType(Type.WorkerHeartBeat)
@@ -181,7 +195,7 @@ public class HAMasterMetaManager extends AbstractMetaManager {
                               .setPushPort(pushPort)
                               .setFetchPort(fetchPort)
                               .setReplicatePort(replicatePort)
-                              .setNumSlots(numSlots)
+                              .putAllDisks(MetaUtil.toPbDiskInfos(disks))
                               .setTime(time)
                               .build())
               .build());
@@ -192,7 +206,7 @@ public class HAMasterMetaManager extends AbstractMetaManager {
 
   @Override
   public void handleRegisterWorker(String host, int rpcPort, int pushPort, int fetchPort,
-    int replicatePort, int numSlots, String requestId) {
+    int replicatePort, Map<String, DiskInfo> disks, String requestId) {
     try {
       ratisServer.submitRequest(ResourceRequest.newBuilder()
           .setCmdType(Type.RegisterWorker)
@@ -204,7 +218,7 @@ public class HAMasterMetaManager extends AbstractMetaManager {
                   .setPushPort(pushPort)
                   .setFetchPort(fetchPort)
                   .setReplicatePort(replicatePort)
-                  .setNumSlots(numSlots)
+                  .putAllDisks(MetaUtil.toPbDiskInfos(disks))
                   .build())
           .build());
     } catch (ServiceException e) {
@@ -230,4 +244,13 @@ public class HAMasterMetaManager extends AbstractMetaManager {
     }
   }
 
+  @Override
+  public void handleUpdatePartitionSize() {
+    try{
+      ratisServer.submitRequest(ResourceRequest.newBuilder().setCmdType(Type.UpdatePartitionSize)
+                                  .setRequestId(ControlMessages.ZERO_UUID()).build());
+    }catch (ServiceException e){
+      LOG.error("Handle update partition size failed !");
+    }
+  }
 }

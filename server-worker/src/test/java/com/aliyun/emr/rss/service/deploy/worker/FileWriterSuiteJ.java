@@ -22,8 +22,19 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import scala.Function0;
@@ -37,9 +48,6 @@ import org.junit.Test;
 import org.mockito.Mockito;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.fail;
 
 import com.aliyun.emr.rss.common.RssConf;
 import com.aliyun.emr.rss.common.network.TransportContext;
@@ -58,8 +66,13 @@ import com.aliyun.emr.rss.common.network.util.MapConfigProvider;
 import com.aliyun.emr.rss.common.network.util.TransportConf;
 import com.aliyun.emr.rss.common.protocol.PartitionSplitMode;
 import com.aliyun.emr.rss.common.protocol.PartitionType;
+import com.aliyun.emr.rss.common.protocol.StorageHint;
 import com.aliyun.emr.rss.common.util.ThreadUtils;
 import com.aliyun.emr.rss.common.util.Utils;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.fail;
 
 public class FileWriterSuiteJ {
 
@@ -95,8 +108,19 @@ public class FileWriterSuiteJ {
     }).when(source)
       .sample(Mockito.anyString(), Mockito.anyString(), Mockito.any(Function0.class));
 
-    flusher = new DiskFlusher(tempDir, 100, source, DeviceMonitor$.MODULE$.EmptyMonitor(), 2);
-    MemoryTracker.initialize(0.8, 0.9, 0.5, 0.6, 10, 10, 10);
+    flusher = new DiskFlusher(tempDir,
+      source,
+      DeviceMonitor$.MODULE$.EmptyMonitor(),
+      1,
+      "disk1",
+      StorageHint.Type.HDD);
+    MemoryTracker.initialize(0.8,
+      0.9,
+      0.5,
+      0.6,
+      10,
+      10,
+      10);
   }
 
   public static void setupChunkServer(FileInfo info) throws Exception {
@@ -173,7 +197,7 @@ public class FileWriterSuiteJ {
   }
 
   private FetchResult fetchChunks(TransportClient client,
-                                  List<Integer> chunkIndices) throws Exception {
+    List<Integer> chunkIndices) throws Exception {
     final Semaphore sem = new Semaphore(0);
 
     final FetchResult res = new FetchResult();
@@ -279,7 +303,12 @@ public class FileWriterSuiteJ {
   @Test
   public void testHugeBufferQueueSize() throws IOException {
     File file = getTemporaryFile();
-    flusher = new DiskFlusher(file, 100_0000, source, DeviceMonitor$.MODULE$.EmptyMonitor(), 2);
+    flusher = new DiskFlusher(file,
+      source,
+      DeviceMonitor$.MODULE$.EmptyMonitor(),
+      1,
+      "disk2",
+      StorageHint.Type.HDD);
   }
 
   @Test

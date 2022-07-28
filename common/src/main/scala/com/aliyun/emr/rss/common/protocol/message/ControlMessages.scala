@@ -22,10 +22,12 @@ import java.util.UUID
 
 import scala.collection.JavaConverters._
 
+import com.google.protobuf.ByteString
+
 import com.aliyun.emr.rss.common.internal.Logging
-import com.aliyun.emr.rss.common.meta.WorkerInfo
+import com.aliyun.emr.rss.common.meta.{DiskInfo, WorkerInfo}
 import com.aliyun.emr.rss.common.network.protocol.TransportMessage
-import com.aliyun.emr.rss.common.protocol.{PartitionLocation, PartitionSplitMode, PartitionType, TransportMessages}
+import com.aliyun.emr.rss.common.protocol.{PartitionLocation, PartitionSplitMode, PartitionType, StorageHint, TransportMessages}
 import com.aliyun.emr.rss.common.protocol.TransportMessages._
 import com.aliyun.emr.rss.common.protocol.TransportMessages.MessageType._
 import com.aliyun.emr.rss.common.util.Utils
@@ -43,26 +45,43 @@ sealed trait Message extends Serializable{
       case RemoveExpiredShuffle =>
         new TransportMessage(TransportMessages.MessageType.REMOVE_EXPIRED_SHUFFLE, null)
 
-      case RegisterWorker(host, rpcPort, pushPort, fetchPort, replicatePort, numSlots, requestId) =>
+      case RegisterWorker(host, rpcPort, pushPort, fetchPort, replicatePort, disks, requestId) =>
+        val pbDisks = disks.asScala
+          .map(item =>
+            item._1 -> PbDiskInfo
+              .newBuilder()
+              .setUsableSpace(item._2.usableSpace)
+              .setAvgFlushTime(item._2.avgFlushTime)
+              .setUsedSlots(item._2.activeSlots)
+              .build()
+          ).toMap.asJava
         val payload = TransportMessages.PbRegisterWorker.newBuilder()
           .setHost(host)
           .setRpcPort(rpcPort)
           .setPushPort(pushPort)
           .setFetchPort(fetchPort)
           .setReplicatePort(replicatePort)
-          .setNumSlots(numSlots)
+          .putAllDisks(pbDisks)
           .setRequestId(requestId)
           .build().toByteArray
         new TransportMessage(TransportMessages.MessageType.REGISTER_WORKER, payload)
 
-      case HeartbeatFromWorker(host, rpcPort, pushPort, fetchPort, replicatePort, numSlots,
+      case HeartbeatFromWorker(host, rpcPort, pushPort, fetchPort, replicatePort, disks,
       shuffleKeys, requestId) =>
+        val pbDisks = disks.asScala
+          .map(item => item._1 -> PbDiskInfo
+              .newBuilder()
+              .setUsableSpace(item._2.usableSpace)
+              .setAvgFlushTime(item._2.avgFlushTime)
+              .setUsedSlots(item._2.activeSlots)
+              .build()
+          ).toMap.asJava
         val payload = TransportMessages.PbHeartbeatFromWorker.newBuilder()
           .setHost(host)
           .setRpcPort(rpcPort)
           .setPushPort(pushPort)
           .setFetchPort(fetchPort)
-          .setNumSlots(numSlots)
+          .putAllDisks(pbDisks)
           .setReplicatePort(replicatePort)
           .addAllShuffleKeys(shuffleKeys)
           .setRequestId(requestId)
@@ -108,12 +127,14 @@ sealed trait Message extends Serializable{
         new TransportMessage(TransportMessages.MessageType.REQUEST_SLOTS, payload)
 
       case ReleaseSlots(applicationId, shuffleId, workerIds, slots, requestId) =>
+        val pbSlots = slots.asScala.map(slot =>
+          PbSlotInfo.newBuilder().putAllSlot(slot).build()).toList
         val payload = TransportMessages.PbReleaseSlots.newBuilder()
           .setApplicationId(applicationId)
           .setShuffleId(shuffleId)
-          .addAllSlots(slots)
           .setRequestId(requestId)
           .addAllWorkerIds(workerIds)
+          .addAllSlots(pbSlots.asJava)
           .build().toByteArray
         new TransportMessage(TransportMessages.MessageType.RELEASE_SLOTS, payload)
 
@@ -180,13 +201,15 @@ sealed trait Message extends Serializable{
         new TransportMessage(TransportMessages.MessageType.GET_REDUCER_FILE_GROUP, payload)
 
       case GetReducerFileGroupResponse(status, fileGroup, attempts) =>
-        val builder = TransportMessages.PbGetReducerFileGroupResponse.newBuilder()
+        val builder = TransportMessages.PbGetReducerFileGroupResponse
+          .newBuilder()
           .setStatus(status.getValue)
-        builder.addAllFileGroup(fileGroup.map { arr =>
-          PbFileGroup.newBuilder()
-            .addAllLocaltions(arr.map(PartitionLocation.toPbPartitionLocation).toIterable.asJava)
-            .build()
-        }.toIterable.asJava)
+        builder.addAllFileGroup(
+          fileGroup.map { arr => PbFileGroup.newBuilder().addAllLocations(arr
+            .map(PartitionLocation.toPbPartitionLocation).toIterable.asJava).build()}
+            .toIterable
+            .asJava
+        )
         builder.addAllAttempts(attempts.map(new Integer(_)).toIterable.asJava)
         val payload = builder.build().toByteArray
         new TransportMessage(TransportMessages.MessageType.GET_REDUCER_FILE_GROUP_RESPONSE, payload)
@@ -244,10 +267,12 @@ sealed trait Message extends Serializable{
           .setStatus(status.getValue).build().toByteArray
         new TransportMessage(TransportMessages.MessageType.APPLICATION_LOST_RESPONSE, payload)
 
-      case HeartBeatFromApplication(appId, requestId) =>
+      case HeartBeatFromApplication(appId, totalWritten, fileCount, requestId) =>
         val payload = TransportMessages.PbHeartBeatFromApplication.newBuilder()
           .setAppId(appId)
           .setRequestId(requestId)
+          .setTotalWritten(totalWritten)
+          .setFileCount(fileCount)
           .build().toByteArray
         new TransportMessage(TransportMessages.MessageType.HEARTBEAT_FROM_APPLICATION, payload)
 
@@ -298,7 +323,7 @@ sealed trait Message extends Serializable{
         new TransportMessage(TransportMessages.MessageType.REREGISTER_WORKER_RESPONSE, payload)
 
       case ReserveSlots(applicationId, shuffleId, masterLocations, slaveLocations,
-      splitThreshold, splitMode, partType, storageHint) =>
+      splitThreshold, splitMode, partType) =>
         val payload = TransportMessages.PbReserveSlots.newBuilder()
           .setApplicationId(applicationId)
           .setShuffleId(shuffleId)
@@ -309,7 +334,6 @@ sealed trait Message extends Serializable{
           .setSplitThreshold(splitThreshold)
           .setSplitMode(splitMode.getValue)
           .setPartitionType(partType.getValue)
-          .setStorageHintOrdinal(storageHint.ordinal())
           .build().toByteArray
         new TransportMessage(TransportMessages.MessageType.RESERVE_SLOTS, payload)
 
@@ -329,14 +353,28 @@ sealed trait Message extends Serializable{
           .build().toByteArray
         new TransportMessage(TransportMessages.MessageType.COMMIT_FILES, payload)
 
-      case CommitFilesResponse(status, committedMasterIds, committedSlaveIds,
-      failedMasterIds, failedSlaveIds) =>
+      case CommitFilesResponse(
+        status,
+        committedMasterIds,
+        committedSlaveIds,
+        failedMasterIds,
+        failedSlaveIds,
+        committedMasterStorageHints,
+        committedSlaveStorageHints,
+        totalWritten,
+        fileCount) =>
         val builder = TransportMessages.PbCommitFilesResponse.newBuilder()
           .setStatus(status.getValue)
         builder.addAllCommittedMasterIds(committedMasterIds)
         builder.addAllCommittedSlaveIds(committedSlaveIds)
         builder.addAllFailedMasterIds(failedMasterIds)
         builder.addAllFailedSlaveIds(failedSlaveIds)
+        committedMasterStorageHints.asScala.foreach(entry =>
+          builder.putCommittedMasterStorageHints(entry._1, StorageHint.toPb(entry._2)))
+        committedSlaveStorageHints.asScala.foreach(entry =>
+          builder.putCommittedSlaveStorageHints(entry._1, StorageHint.toPb(entry._2)))
+        builder.setTotalWritten(totalWritten)
+        builder.setFileCount(fileCount)
         val payload = builder.build().toByteArray
         new TransportMessage(TransportMessages.MessageType.COMMIT_FILES_RESPONSE, payload)
 
@@ -433,7 +471,7 @@ object ControlMessages extends Logging{
       pushPort: Int,
       fetchPort: Int,
       replicatePort: Int,
-      numSlots: Int,
+      disks: util.Map[String, DiskInfo],
       override var requestId: String = ZERO_UUID)
     extends MasterRequestMessage
 
@@ -443,7 +481,7 @@ object ControlMessages extends Logging{
       pushPort: Int,
       fetchPort: Int,
       replicatePort : Int,
-      numSlots: Int,
+      slots: util.Map[String, DiskInfo],
       shuffleKeys: util.HashSet[String],
     override var requestId: String = ZERO_UUID) extends MasterRequestMessage
 
@@ -476,7 +514,7 @@ object ControlMessages extends Logging{
     applicationId: String,
     shuffleId: Int,
     workerIds: util.List[String],
-    slots: util.List[Integer],
+    slots: util.List[util.Map[String, Integer]],
     override var requestId: String = ZERO_UUID)
     extends MasterRequestMessage
 
@@ -557,7 +595,10 @@ object ControlMessages extends Logging{
   case class ApplicationLostResponse(status: StatusCode) extends MasterMessage
 
   case class HeartBeatFromApplication(
-      appId: String, override var requestId: String = ZERO_UUID) extends MasterRequestMessage
+    appId: String,
+    totalWritten: Long,
+    fileCount: Long,
+    override var requestId: String = ZERO_UUID) extends MasterRequestMessage
 
   case class GetBlacklist(localBlacklist: util.List[WorkerInfo]) extends MasterMessage
 
@@ -587,8 +628,7 @@ object ControlMessages extends Logging{
       slaveLocations: util.List[PartitionLocation],
       splitThreshold: Long,
       splitMode: PartitionSplitMode,
-      partitionType: PartitionType,
-      storageHint: PartitionLocation.StorageHint)
+      partitionType: PartitionType)
     extends WorkerMessage
 
   case class ReserveSlotsResponse(
@@ -603,12 +643,18 @@ object ControlMessages extends Logging{
     extends WorkerMessage
 
   case class CommitFilesResponse(
-      status: StatusCode,
-      committedMasterIds: util.List[String],
-      committedSlaveIds: util.List[String],
-      failedMasterIds: util.List[String],
-      failedSlaveIds: util.List[String])
-    extends WorkerMessage
+    status: StatusCode,
+    committedMasterIds: util.List[String],
+    committedSlaveIds: util.List[String],
+    failedMasterIds: util.List[String],
+    failedSlaveIds: util.List[String],
+    committedMasterStorageHints: util.Map[String, StorageHint] =
+    Map.empty[String, StorageHint].asJava,
+    committedSlaveStorageHints: util.Map[String, StorageHint] =
+    Map.empty[String, StorageHint].asJava,
+    totalWritten: Long = 0,
+    fileCount: Int = 0
+  ) extends WorkerMessage
 
   case class Destroy(
       shuffleKey: String,
@@ -645,20 +691,32 @@ object ControlMessages extends Logging{
 
       case REGISTER_WORKER =>
         val pbRegisterWorker = PbRegisterWorker.parseFrom(message.getPayload)
+        val disks = pbRegisterWorker.getDisksMap.asScala.map(item =>
+            item._1 -> new DiskInfo(
+                item._1,
+                item._2.getUsableSpace,
+                item._2.getAvgFlushTime,
+                item._2.getUsedSlots)).asJava
         RegisterWorker(pbRegisterWorker.getHost, pbRegisterWorker.getRpcPort,
           pbRegisterWorker.getPushPort, pbRegisterWorker.getFetchPort,
-          pbRegisterWorker.getReplicatePort, pbRegisterWorker.getNumSlots,
-          pbRegisterWorker.getRequestId)
+          pbRegisterWorker.getReplicatePort, disks, pbRegisterWorker.getRequestId)
 
       case HEARTBEAT_FROM_WORKER =>
         val pbHeartbeatFromWorker = PbHeartbeatFromWorker.parseFrom(message.getPayload)
         val shuffleKeys = new util.HashSet[String]()
+        val disks = pbHeartbeatFromWorker.getDisksMap.asScala
+          .map(item => item._1 -> new DiskInfo(
+                item._1,
+                item._2.getUsableSpace,
+                item._2.getAvgFlushTime,
+                item._2.getUsedSlots
+              )).asJava
         if (pbHeartbeatFromWorker.getShuffleKeysCount > 0) {
           shuffleKeys.addAll(pbHeartbeatFromWorker.getShuffleKeysList)
         }
         HeartbeatFromWorker(pbHeartbeatFromWorker.getHost, pbHeartbeatFromWorker.getRpcPort,
           pbHeartbeatFromWorker.getPushPort, pbHeartbeatFromWorker.getFetchPort,
-          pbHeartbeatFromWorker.getReplicatePort, pbHeartbeatFromWorker.getNumSlots, shuffleKeys,
+          pbHeartbeatFromWorker.getReplicatePort, disks, shuffleKeys,
           pbHeartbeatFromWorker.getRequestId)
 
       case HEARTBEAT_RESPONSE =>
@@ -696,9 +754,15 @@ object ControlMessages extends Logging{
 
       case RELEASE_SLOTS =>
         val pbRequestSlots = PbReleaseSlots.parseFrom(message.getPayload)
-        ReleaseSlots(pbRequestSlots.getApplicationId, pbRequestSlots.getShuffleId,
+        val slotsList = pbRequestSlots.getSlotsList.asScala.map(pbSlot =>
+          new util.HashMap[String, Integer](pbSlot.getSlotMap)).toList.asJava
+        ReleaseSlots(
+          pbRequestSlots.getApplicationId,
+          pbRequestSlots.getShuffleId,
           new util.ArrayList[String](pbRequestSlots.getWorkerIdsList),
-          new util.ArrayList[Integer](pbRequestSlots.getSlotsList), pbRequestSlots.getRequestId)
+          new util.ArrayList[util.Map[String, Integer]](slotsList),
+          pbRequestSlots.getRequestId
+        )
 
       case RELEASE_SLOTS_RESPONSE =>
         val pbReleaseSlotsResponse = PbReleaseSlotsResponse.parseFrom(message.getPayload)
@@ -746,7 +810,7 @@ object ControlMessages extends Logging{
         val pbGetReducerFileGroupResponse = PbGetReducerFileGroupResponse
           .parseFrom(message.getPayload)
         val fileGroup = pbGetReducerFileGroupResponse.getFileGroupList.asScala.map { fg =>
-            fg.getLocaltionsList.asScala.map(PartitionLocation.fromPbPartitionLocation).toArray
+            fg.getLocationsList.asScala.map(PartitionLocation.fromPbPartitionLocation).toArray
           }.toArray
         val attempts = pbGetReducerFileGroupResponse.getAttemptsList.asScala.map(_.toInt).toArray
         GetReducerFileGroupResponse(Utils.toStatusCode(pbGetReducerFileGroupResponse.getStatus),
@@ -771,8 +835,12 @@ object ControlMessages extends Logging{
 
       case HEARTBEAT_FROM_APPLICATION =>
         val pbHeartBeatFromApplication = PbHeartBeatFromApplication.parseFrom(message.getPayload)
-        HeartBeatFromApplication(pbHeartBeatFromApplication.getAppId,
-          pbHeartBeatFromApplication.getRequestId)
+        HeartBeatFromApplication(
+          pbHeartBeatFromApplication.getAppId,
+          pbHeartBeatFromApplication.getTotalWritten,
+          pbHeartBeatFromApplication.getFileCount,
+          pbHeartBeatFromApplication.getRequestId
+        )
 
       case GET_BLACKLIST =>
         val pbGetBlacklist = PbGetBlacklist.parseFrom(message.getPayload)
@@ -821,8 +889,7 @@ object ControlMessages extends Logging{
             .map(PartitionLocation.fromPbPartitionLocation(_)).toList.asJava),
           pbReserveSlots.getSplitThreshold,
           Utils.toShuffleSplitMode(pbReserveSlots.getSplitMode),
-          Utils.toPartitionType(pbReserveSlots.getPartitionType),
-          PartitionLocation.StorageHint.values()(pbReserveSlots.getStorageHintOrdinal))
+          Utils.toPartitionType(pbReserveSlots.getPartitionType))
 
       case RESERVE_SLOTS_RESPONSE =>
         val pbReserveSlotsResponse = PbReserveSlotsResponse.parseFrom(message.getPayload)
@@ -837,11 +904,22 @@ object ControlMessages extends Logging{
 
       case COMMIT_FILES_RESPONSE =>
         val pbCommitFilesResponse = PbCommitFilesResponse.parseFrom(message.getPayload)
-        CommitFilesResponse(Utils.toStatusCode(pbCommitFilesResponse.getStatus),
+        val committedMasterStorageHints = new util.HashMap[String, StorageHint]()
+        val committedSlaveStorageHints = new util.HashMap[String, StorageHint]()
+        pbCommitFilesResponse.getCommittedMasterStorageHintsMap.asScala.foreach(entry =>
+          committedMasterStorageHints.put(entry._1, StorageHint.fromPb(entry._2)))
+        pbCommitFilesResponse.getCommittedSlaveStorageHintsMap.asScala.foreach(entry =>
+          committedSlaveStorageHints.put(entry._1, StorageHint.fromPb(entry._2)))
+        CommitFilesResponse(
+          Utils.toStatusCode(pbCommitFilesResponse.getStatus),
           pbCommitFilesResponse.getCommittedMasterIdsList,
           pbCommitFilesResponse.getCommittedSlaveIdsList,
           pbCommitFilesResponse.getFailedMasterIdsList,
-          pbCommitFilesResponse.getFailedSlaveIdsList)
+          pbCommitFilesResponse.getFailedSlaveIdsList,
+          committedMasterStorageHints,
+          committedSlaveStorageHints,
+          pbCommitFilesResponse.getTotalWritten,
+          pbCommitFilesResponse.getFileCount)
 
       case DESTROY =>
         val pbDestroy = PbDestroy.parseFrom(message.getPayload)

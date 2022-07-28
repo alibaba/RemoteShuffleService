@@ -29,6 +29,7 @@ import com.aliyun.emr.rss.common.util.Utils.runCommand
 
 class MountInfo(val mountPoint: String, val deviceInfo: DeviceInfo) extends Serializable {
   val dirInfos: ListBuffer[File] = new ListBuffer[File]()
+  val mountPointFile = new File(mountPoint)
 
   def addDir(dir: File): Unit = {
     dirInfos.append(dir)
@@ -49,6 +50,7 @@ class MountInfo(val mountPoint: String, val deviceInfo: DeviceInfo) extends Seri
 
 class DeviceInfo(val name: String) extends Serializable {
   var mountInfos: ListBuffer[MountInfo] = new ListBuffer[MountInfo]()
+  var virtual = false
 
   def addMountInfo(mountInfo: MountInfo): Unit = {
     mountInfos.append(mountInfo)
@@ -70,13 +72,17 @@ class DeviceInfo(val name: String) extends Serializable {
 object DeviceInfo {
   val logger = LoggerFactory.getLogger(classOf[DeviceInfo])
 
-  def getDeviceAndMountInfos(workingDirs: util.List[File]):
-  (util.HashMap[String, DeviceInfo], util.HashMap[String, MountInfo]) = {
+  def getDeviceAndMountInfos(workingDirs: util.List[File]): (
+    util.HashMap[String, DeviceInfo],
+      util.HashMap[String, MountInfo],
+      util.HashMap[String, MountInfo]) = {
     val allDevices = new util.HashMap[String, DeviceInfo]()
     val allMounts = new util.HashMap[String, MountInfo]()
 
     // (/dev/vdb, /mnt/disk1)
-    val fsMounts = runCommand("df -h").trim
+    val dfResult = runCommand("df -h").trim
+    logger.info(s"df result $dfResult")
+    val fsMounts = dfResult
       .split("[\n\r]")
       .tail
       .map(line => {
@@ -85,15 +91,19 @@ object DeviceInfo {
       })
 
     // (vda, vdb)
-    val blocks = runCommand("ls /sys/block/").trim
+    val lsBlockResult = runCommand("ls /sys/block/").trim
+    logger.info(s"ls block $lsBlockResult")
+    val blocks = lsBlockResult
       .split("[ \n\r\t]+")
 
-    fsMounts.foreach(fsMount => {
-      val baseName = fsMount._1.substring(fsMount._1.lastIndexOf('/') + 1)
+    val deviceNames = blocks.zipWithIndex
+
+    fsMounts.foreach { case (fileSystem, mountpoint) =>
+      val deviceName = fileSystem.substring(fileSystem.lastIndexOf('/') + 1)
       var index = -1
       var maxLength = -1
-      blocks.zipWithIndex.foreach(block => {
-        if (baseName.startsWith(block._1) && block._1.length > maxLength) {
+      deviceNames.foreach(block => {
+        if (deviceName.startsWith(block._1) && block._1.length > maxLength) {
           index = block._2
           maxLength = block._1.length
         }
@@ -102,20 +112,23 @@ object DeviceInfo {
       val newDeviceInfoFunc =
         new util.function.Function[String, DeviceInfo]() {
           override def apply(s: String): DeviceInfo = {
-            new DeviceInfo(s)
+            val deviceInfo = new DeviceInfo(s)
+            if (index < 0) {
+              deviceInfo.virtual = true
+            }
+            deviceInfo
           }
         }
 
-      if (index >= 0) {
-        val deviceInfo = allDevices.computeIfAbsent(blocks(index), newDeviceInfoFunc)
-        val mountInfo = new MountInfo(fsMount._2, deviceInfo)
-        deviceInfo.addMountInfo(mountInfo)
-        allMounts.putIfAbsent(fsMount._2, mountInfo)
-      }
-    })
+      val deviceInfo = allDevices.computeIfAbsent(deviceName, newDeviceInfoFunc)
+      val mountInfo = new MountInfo(mountpoint, deviceInfo)
+      deviceInfo.addMountInfo(mountInfo)
+      allMounts.putIfAbsent(mountpoint, mountInfo)
+    }
 
     val retDeviceInfos = new util.HashMap[String, DeviceInfo]()
     val retMountInfos = new util.HashMap[String, MountInfo]()
+    val retWorkingMountInfos = new util.HashMap[String, MountInfo]()
 
     workingDirs.asScala.foreach(dir => {
       val mount = getMountPoint(dir.getAbsolutePath, allMounts)
@@ -123,15 +136,17 @@ object DeviceInfo {
       mountInfo.addDir(dir)
       retMountInfos.putIfAbsent(mountInfo.mountPoint, mountInfo)
       retDeviceInfos.putIfAbsent(mountInfo.deviceInfo.name, mountInfo.deviceInfo)
+      retWorkingMountInfos.put(dir.getAbsolutePath, mountInfo)
     })
 
     retDeviceInfos.asScala.foreach(entry => {
       val mountInfos = entry._2.mountInfos.filter(_.dirInfos.nonEmpty)
       entry._2.mountInfos = mountInfos
     })
-    logger.info(s"Device Infos:\n$retDeviceInfos")
+    logger.info(s"Device initialization \n " +
+      s"$retDeviceInfos \n $retMountInfos \n $retWorkingMountInfos")
 
-    (retDeviceInfos, retMountInfos)
+    (retDeviceInfos, retMountInfos, retWorkingMountInfos)
   }
 
   def getMountPoint(absPath: String,

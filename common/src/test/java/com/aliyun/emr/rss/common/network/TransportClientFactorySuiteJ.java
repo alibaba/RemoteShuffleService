@@ -24,7 +24,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import static org.junit.Assert.*;
 
 import com.aliyun.emr.rss.common.network.client.TransportClient;
 import com.aliyun.emr.rss.common.network.client.TransportClientFactory;
@@ -34,6 +33,8 @@ import com.aliyun.emr.rss.common.network.util.ConfigProvider;
 import com.aliyun.emr.rss.common.network.util.JavaUtils;
 import com.aliyun.emr.rss.common.network.util.MapConfigProvider;
 import com.aliyun.emr.rss.common.network.util.TransportConf;
+
+import static org.junit.Assert.*;
 
 public class TransportClientFactorySuiteJ {
   private TransportContext context;

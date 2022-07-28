@@ -134,7 +134,7 @@ private[deploy] class Worker(
 
   // worker info
   val workerInfo = new WorkerInfo(host, rpcPort, pushPort, fetchPort, replicatePort,
-    RssConf.workerNumSlots(conf, localStorageManager.numDisks), controller.self)
+    localStorageManager.diskSnapshot, controller.self)
 
   // whether this Worker registered to Master succesfully
   val registered = new AtomicBoolean(false)
@@ -169,9 +169,7 @@ private[deploy] class Worker(
 
   workerSource.addGauge(
     WorkerSource.RegisteredShuffleCount, _ => partitionLocationInfo.shuffleKeySet.size())
-  workerSource.addGauge(WorkerSource.TotalSlots, _ => workerInfo.numSlots)
   workerSource.addGauge(WorkerSource.SlotsUsed, _ => workerInfo.usedSlots())
-  workerSource.addGauge(WorkerSource.SlotsAvailable, _ => workerInfo.freeSlots())
   workerSource.addGauge(WorkerSource.SortMemory, _ => memoryTracker.getSortMemoryCounter.get())
   workerSource.addGauge(WorkerSource.SortingFiles, _ => partitionsSorter.getSortingCount)
   workerSource.addGauge(WorkerSource.DiskBuffer, _ => memoryTracker.getDiskBufferCounter.get())
@@ -180,19 +178,13 @@ private[deploy] class Worker(
   workerSource.addGauge(WorkerSource.PausePushDataAndReplicateCount,
     _ => memoryTracker.getPausePushDataAndReplicateCounter)
 
-  def updateNumSlots(numSlots: Int): Unit = {
-    workerInfo.setNumSlots(numSlots)
-    heartBeatToMaster()
-  }
-
   def heartBeatToMaster(): Unit = {
     val shuffleKeys = new jHashSet[String]
     shuffleKeys.addAll(partitionLocationInfo.shuffleKeySet)
     shuffleKeys.addAll(localStorageManager.shuffleKeySet())
     val response = rssHARetryClient.askSync[HeartbeatResponse](
-      HeartbeatFromWorker(host, rpcPort, pushPort, fetchPort, replicatePort, workerInfo.numSlots,
-        shuffleKeys)
-      , classOf[HeartbeatResponse])
+      HeartbeatFromWorker(host, rpcPort, pushPort, fetchPort, replicatePort,
+        localStorageManager.diskSnapshot, shuffleKeys), classOf[HeartbeatResponse])
     if (response.registered) {
       cleanTaskQueue.put(response.expiredShuffleKeys)
     } else {
@@ -212,7 +204,7 @@ private[deploy] class Worker(
 
   def init(): Unit = {
     logInfo(s"Starting Worker $host:$pushPort:$fetchPort:$replicatePort" +
-      s" with ${workerInfo.numSlots} slots.")
+      s" with ${workerInfo.disks} slots.")
     registerWithMaster()
 
     // start heartbeat
@@ -319,7 +311,7 @@ private[deploy] class Worker(
     while (registerTimeout > 0) {
       val rsp = try {
         rssHARetryClient.askSync[RegisterWorkerResponse](
-          RegisterWorker(host, rpcPort, pushPort, fetchPort, replicatePort, workerInfo.numSlots),
+          RegisterWorker(host, rpcPort, pushPort, fetchPort, replicatePort, workerInfo.disks),
           classOf[RegisterWorkerResponse]
         )
       } catch {

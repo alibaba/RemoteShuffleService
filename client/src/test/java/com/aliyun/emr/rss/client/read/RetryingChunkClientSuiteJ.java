@@ -34,6 +34,18 @@ import com.google.common.collect.Sets;
 import io.netty.channel.Channel;
 import org.junit.Test;
 import org.mockito.stubbing.Answer;
+
+import com.aliyun.emr.rss.common.RssConf;
+import com.aliyun.emr.rss.common.network.buffer.ManagedBuffer;
+import com.aliyun.emr.rss.common.network.buffer.NioManagedBuffer;
+import com.aliyun.emr.rss.common.network.client.ChunkReceivedCallback;
+import com.aliyun.emr.rss.common.network.client.TransportClient;
+import com.aliyun.emr.rss.common.network.client.TransportClientFactory;
+import com.aliyun.emr.rss.common.network.client.TransportResponseHandler;
+import com.aliyun.emr.rss.common.network.protocol.StreamHandle;
+import com.aliyun.emr.rss.common.protocol.PartitionLocation;
+import com.aliyun.emr.rss.common.util.ThreadUtils;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -48,17 +60,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
-
-import com.aliyun.emr.rss.common.RssConf;
-import com.aliyun.emr.rss.common.network.buffer.ManagedBuffer;
-import com.aliyun.emr.rss.common.network.buffer.NioManagedBuffer;
-import com.aliyun.emr.rss.common.network.client.ChunkReceivedCallback;
-import com.aliyun.emr.rss.common.network.client.TransportClient;
-import com.aliyun.emr.rss.common.network.client.TransportClientFactory;
-import com.aliyun.emr.rss.common.network.client.TransportResponseHandler;
-import com.aliyun.emr.rss.common.network.protocol.StreamHandle;
-import com.aliyun.emr.rss.common.protocol.PartitionLocation;
-import com.aliyun.emr.rss.common.util.ThreadUtils;
 
 public class RetryingChunkClientSuiteJ {
 

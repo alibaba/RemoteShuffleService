@@ -23,6 +23,7 @@ import org.apache.spark.SparkConf;
 import org.apache.spark.memory.*;
 import org.apache.spark.unsafe.memory.MemoryBlock;
 import org.junit.Test;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 

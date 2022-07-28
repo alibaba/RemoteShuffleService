@@ -34,9 +34,6 @@ import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.junit.Test;
-import static org.mockito.Matchers.any;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import com.aliyun.emr.rss.client.compress.RssLz4Compressor;
 import com.aliyun.emr.rss.common.RssConf;
@@ -46,6 +43,10 @@ import com.aliyun.emr.rss.common.protocol.PartitionLocation;
 import com.aliyun.emr.rss.common.protocol.message.ControlMessages;
 import com.aliyun.emr.rss.common.protocol.message.StatusCode;
 import com.aliyun.emr.rss.common.rpc.RpcEndpointRef;
+
+import static org.mockito.Matchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class ShuffleClientSuiteJ {
 

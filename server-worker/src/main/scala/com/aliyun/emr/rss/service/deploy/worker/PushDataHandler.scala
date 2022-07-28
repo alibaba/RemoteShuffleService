@@ -195,8 +195,13 @@ class PushDataHandler extends BaseMessageHandler with Logging {
       replicateThreadPool.submit(new Runnable {
         override def run(): Unit = {
           val peer = location.getPeer
-          val peerWorker = new WorkerInfo(peer.getHost, peer.getRpcPort, peer.getPushPort,
-            peer.getFetchPort, peer.getReplicatePort, -1, null)
+          val peerWorker = new WorkerInfo(
+            peer.getHost,
+            peer.getRpcPort,
+            peer.getPushPort,
+            peer.getFetchPort,
+            peer.getReplicatePort
+          )
           if (unavailablePeers.containsKey(peerWorker)) {
             pushData.body().release()
             wrappedCallback.onFailure(new Exception(s"Peer $peerWorker unavailable!"))
@@ -328,8 +333,13 @@ class PushDataHandler extends BaseMessageHandler with Logging {
         override def run(): Unit = {
           val location = locations.head
           val peer = location.getPeer
-          val peerWorker = new WorkerInfo(peer.getHost,
-            peer.getRpcPort, peer.getPushPort, peer.getFetchPort, peer.getReplicatePort, -1, null)
+          val peerWorker = new WorkerInfo(
+            peer.getHost,
+            peer.getRpcPort,
+            peer.getPushPort,
+            peer.getFetchPort,
+            peer.getReplicatePort
+          )
           if (unavailablePeers.containsKey(peerWorker)) {
             pushMergedData.body().release()
             wrappedCallback.onFailure(new Exception(s"Peer $peerWorker unavailable!"))

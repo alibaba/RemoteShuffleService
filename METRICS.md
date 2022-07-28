@@ -28,37 +28,35 @@ scrape_configs:
 
 ## Details
 
-| MetricName | Role | Description |
-| :---: | :---: | :--: |
-| WorkerCount      |   master    |  The count of active workers.     |
-| OverloadWorkerCount      |  master     | The count of overloaded workers.       |
-| BlacklistedWorkerCount      | master      | The count of workers in blacklist.       |
-| RegisteredShuffleCount      | master and worker      | The value means count of registered shuffle. |
-| CommitFilesTime      | worker      | CommitFiles means flush and close a shuffle partition file.      |
-| ReserveSlotsTime      | worker      | ReserveSlots means acquire a disk buffer and record partition location.      |
-| FlushDataTime      | worker      | FlushData means flush a disk buffer to disk.      |
-| OpenStreamTime      | worker      | OpenStream means read a shuffle file and send client about chunks size and stream index.      |
-| FetchChunkTime      | worker      | FetchChunk means read a chunk from a shuffle file and send to client.      |
-| MasterPushDataTime      | worker      | MasterPushData means handle pushdata of master partition location.      |
-| SlavePushDataTime      | worker      | MasterPushData means handle pushdata of slave partition location.      |
-| PushDataFailCount      | worker      | The count of failed PushData or PushMergedData.      |
-| TakeBufferTime      | worker      | TakeBuffer means get a disk buffer from disk flusher.      |
-| TotalSlots      | worker      | TotalSlots means the slots of a worker.      |
-| SlotsUsed      | worker      |       |
-| SlotsAvailable      | worker      |       |
-| NettyMemory      | worker      | The value measures all kinds of transport memory used by netty.      |
-| SortTime      | worker      | SortTime measures the time used by sorting a shuffle file.      |
-| SortMemory      | worker      | SortMemory means total reserved memory for sorting shuffle files .      |
-| SortingFiles      | worker      | This value means the count of sorting shuffle files.      |
-| DiskBuffer      | worker      | Disk buffers are part of netty used memory, means data need to write to disk but haven't been written to disk.      |
-| PausePushData      | worker      | PausePushData means the count of worker stopped receiving data from client.      |
-| PausePushDataAndReplicate      | worker      | PausePushDataAndReplicate means the count of worker stopped receiving data from client and other workers.      |
+|        MetricName         |       Role        |                                                  Description                                                   |
+|:-------------------------:|:-----------------:|:--------------------------------------------------------------------------------------------------------------:|
+|        WorkerCount        |      master       |                                          The count of active workers.                                          |
+|    OverloadWorkerCount    |      master       |                                        The count of overloaded workers.                                        |
+|  BlacklistedWorkerCount   |      master       |                                       The count of workers in blacklist.                                       |
+|  RegisteredShuffleCount   | master and worker |                                  The value means count of registered shuffle.                                  |
+|      CommitFilesTime      |      worker       |                          CommitFiles means flush and close a shuffle partition file.                           |
+|     ReserveSlotsTime      |      worker       |                    ReserveSlots means acquire a disk buffer and record partition location.                     |
+|       FlushDataTime       |      worker       |                                  FlushData means flush a disk buffer to disk.                                  |
+|      OpenStreamTime       |      worker       |            OpenStream means read a shuffle file and send client about chunks size and stream index.            |
+|      FetchChunkTime       |      worker       |                     FetchChunk means read a chunk from a shuffle file and send to client.                      |
+|    MasterPushDataTime     |      worker       |                       MasterPushData means handle pushdata of master partition location.                       |
+|     SlavePushDataTime     |      worker       |                       MasterPushData means handle pushdata of slave partition location.                        |
+|     PushDataFailCount     |      worker       |                                The count of failed PushData or PushMergedData.                                 |
+|      TakeBufferTime       |      worker       |                             TakeBuffer means get a disk buffer from disk flusher.                              |
+|         SlotsUsed         |      worker       |                                                                                                                |
+|        NettyMemory        |      worker       |                        The value measures all kinds of transport memory used by netty.                         |
+|         SortTime          |      worker       |                           SortTime measures the time used by sorting a shuffle file.                           |
+|        SortMemory         |      worker       |                       SortMemory means total reserved memory for sorting shuffle files .                       |
+|       SortingFiles        |      worker       |                              This value means the count of sorting shuffle files.                              |
+|        DiskBuffer         |      worker       | Disk buffers are part of netty used memory, means data need to write to disk but haven't been written to disk. |
+|       PausePushData       |      worker       |                  PausePushData means the count of worker stopped receiving data from client.                   |
+| PausePushDataAndReplicate |      worker       |   PausePushDataAndReplicate means the count of worker stopped receiving data from client and other workers.    |
 
 ## Implementation
 
 RSS master metric : `com/aliyun/emr/rss/service/deploy/master/MasterSource.scala`  
 RSS worker metric : `com/aliyun/emr/rss/service/deploy/worker/WorkerSource.scala`
-and `com.aliyun.emr.rss.common.metrics.source.NetWorkSource`  
+and `com.aliyun.emr.rss.common.metrics.source.NetWorkSource`
 
 ## Grafana Dashboard
 

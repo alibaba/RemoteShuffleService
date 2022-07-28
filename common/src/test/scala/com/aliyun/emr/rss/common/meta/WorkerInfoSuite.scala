@@ -19,6 +19,7 @@ package com.aliyun.emr.rss.common.meta
 
 import java.util.{ArrayList => jArrayList}
 import java.util.{Map => jMap}
+import java.util
 import java.util.concurrent.{Future, ThreadLocalRandom}
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -42,37 +43,21 @@ class WorkerInfoSuite extends RssFunSuite {
     run(block)
   }
 
-  test("Serialize/Deserialize WorkerInfo to String correctly.") {
-    val (h1, p1, p2, p3, a1, b1) = ("h1", 1, 2, 3, 10, 11)
-    val (h2, p4, p5, p6, a2, b2) = ("h2", 4, 5, 6, 20, 21)
-    val (h3, p7, p8, p9, a3, b3) = ("h3", 7, 8, 9, 30, 31)
-
-    val pbList = new jArrayList[String](3)
-    pbList.add(WorkerInfo.encodeToPbStr(h1, p1, p2, p3, a1, b1))
-    pbList.add(WorkerInfo.encodeToPbStr(h2, p4, p5, p6, a2, b2))
-    pbList.add(WorkerInfo.encodeToPbStr(h3, p7, p8, p9, a3, b3))
-
-    val workerInfos = WorkerInfo.decodeFromPbMessage(pbList)
-    assertEquals(
-      "The number of WorkerInfo decoded from string is wrong.", pbList.size(), workerInfos.size())
-
-    check(h1, p1, p2, p3, b1, workerInfos)
-    check(h2, p4, p5, p6, b2, workerInfos)
-    check(h3, p7, p8, p9, b3, workerInfos)
-  }
-
-  private def check(
-                     host: String, rpcPort: Int, pushPort: Int, fetchPort: Int
-                     , allocateSize: Int, workerInfos: jMap[WorkerInfo, Integer]): Unit = {
-    val worker = new WorkerInfo(host, rpcPort, pushPort, fetchPort, -1 , -1, null)
+  private def check(host: String, rpcPort: Int, pushPort: Int, fetchPort: Int, replicatePort: Int
+    , workerInfos: jMap[WorkerInfo, util.HashMap[String, Integer]],
+    allocationMap: util.HashMap[String, Integer]): Unit = {
+    val worker = new WorkerInfo(host, rpcPort, pushPort, fetchPort, replicatePort, null)
     val realWorker = workerInfos.get(worker)
     assertNotNull(s"Worker $worker didn't exist.", realWorker)
-    assertEquals(allocateSize, realWorker.intValue())
   }
 
   test("multi-thread modify same WorkerInfo.") {
     val numSlots = 10000
-    val worker = new WorkerInfo("localhost", 10000, 10001, 10002, -1 , numSlots, null)
+    val disks = new util.HashMap[String, DiskInfo]()
+    disks.put("disk1", new DiskInfo("disk1", Int.MaxValue, 1.0, 0))
+    disks.put("disk2", new DiskInfo("disk2", Int.MaxValue, 1.0, 0))
+    disks.put("disk3", new DiskInfo("disk3", Int.MaxValue, 1.0, 0))
+    val worker = new WorkerInfo("localhost", 10000, 10001, 10002, 10003, disks, null)
 
     val allocatedSlots = new AtomicInteger(0)
     val shuffleKey = "appId-shuffleId"
@@ -92,7 +77,9 @@ class WorkerInfoSuite extends RssFunSuite {
             val newAllocatedSlot = Math.min(numSlots, allocatedSlot + requireSlot)
             requireSlot = newAllocatedSlot - allocatedSlot
             if (allocatedSlots.compareAndSet(allocatedSlot, newAllocatedSlot)) {
-              worker.allocateSlots(shuffleKey, requireSlot)
+              val allocationMap = new util.HashMap[String, Integer]()
+              allocationMap.put("disk1", requireSlot)
+              worker.allocateSlots(shuffleKey, allocationMap)
             }
           }
         }
@@ -103,7 +90,6 @@ class WorkerInfoSuite extends RssFunSuite {
 
     assertEquals(numSlots, allocatedSlots.get())
     assertEquals(numSlots, worker.usedSlots())
-    assertEquals(0, worker.freeSlots())
 
     (0 until 8).foreach { _ =>
       futures += es.submit(new Runnable {
@@ -118,7 +104,9 @@ class WorkerInfoSuite extends RssFunSuite {
             val newAllocatedSlot = Math.max(0, allocatedSlot - releaseSlot)
             releaseSlot = allocatedSlot - newAllocatedSlot
             if (allocatedSlots.compareAndSet(allocatedSlot, newAllocatedSlot)) {
-              worker.releaseSlots(shuffleKey, releaseSlot)
+              val allocations = new util.HashMap[String, Integer]()
+              allocations.put("disk1", releaseSlot)
+              worker.releaseSlots(shuffleKey, allocations)
             }
           }
           worker.releaseSlots(shuffleKey)
@@ -130,38 +118,37 @@ class WorkerInfoSuite extends RssFunSuite {
 
     assertEquals(0, allocatedSlots.get())
     assertEquals(0, worker.usedSlots())
-    assertEquals(numSlots, worker.freeSlots())
 
     ThreadUtils.shutdown(es, 800.millisecond)
   }
 
   test("WorkerInfo not equals when host different.") {
-    val worker1 = new WorkerInfo("h1", 10001, 10002, 10003, 1000, -1 , null)
-    val worker2 = new WorkerInfo("h2", 10001, 10002, 10003, 1000, -1 , null)
+    val worker1 = new WorkerInfo("h1", 10001, 10002, 10003, 1000, null, null)
+    val worker2 = new WorkerInfo("h2", 10001, 10002, 10003, 1000, null, null)
     assertNotEquals(worker1, worker2)
   }
 
   test("WorkerInfo not equals when rpc port different.") {
-    val worker1 = new WorkerInfo("h1", 10001, 10002, 10003, 1000, -1 , null)
-    val worker2 = new WorkerInfo("h1", 20001, 10002, 10003, 1000, -1 , null)
+    val worker1 = new WorkerInfo("h1", 10001, 10002, 10003, 1000, null, null)
+    val worker2 = new WorkerInfo("h1", 20001, 10002, 10003, 1000, null, null)
     assertNotEquals(worker1, worker2)
   }
 
   test("WorkerInfo not equals when push port different.") {
-    val worker1 = new WorkerInfo("h1", 10001, 10002, 10003, 1000, -1 , null)
-    val worker2 = new WorkerInfo("h1", 10001, 20002, 10003, 1000, -1 , null)
+    val worker1 = new WorkerInfo("h1", 10001, 10002, 10003, 1000,null, null)
+    val worker2 = new WorkerInfo("h1", 10001, 20002, 10003, 1000,null, null)
     assertNotEquals(worker1, worker2)
   }
 
   test("WorkerInfo not equals when fetch port different.") {
-    val worker1 = new WorkerInfo("h1", 10001, 10002, 10003, 1000, -1 , null)
-    val worker2 = new WorkerInfo("h1", 10001, 10002, 20003, 1000, -1 , null)
+    val worker1 = new WorkerInfo("h1", 10001, 10002, 10003, 1000, null, null)
+    val worker2 = new WorkerInfo("h1", 10001, 10002, 20003, 1000, null, null)
     assertNotEquals(worker1, worker2)
   }
 
   test("WorkerInfo equals when numSlots different.") {
-    val worker1 = new WorkerInfo("h1", 10001, 10002, 10003, 1000, -1 , null)
-    val worker2 = new WorkerInfo("h1", 10001, 10002, 10003, 2000, -1 , null)
+    val worker1 = new WorkerInfo("h1", 10001, 10002, 10003, 1000, null, null)
+    val worker2 = new WorkerInfo("h1", 10001, 10002, 10003, 2000, null, null)
     assertEquals(worker1, worker2)
   }
 }

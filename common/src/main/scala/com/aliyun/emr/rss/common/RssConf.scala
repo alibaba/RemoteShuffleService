@@ -23,7 +23,9 @@ import java.util.concurrent.ConcurrentHashMap
 import scala.collection.JavaConverters._
 
 import com.aliyun.emr.rss.common.internal.Logging
-import com.aliyun.emr.rss.common.protocol.{PartitionLocation, PartitionSplitMode, PartitionType}
+import com.aliyun.emr.rss.common.protocol.{PartitionLocation, PartitionSplitMode, PartitionType, StorageHint}
+import com.aliyun.emr.rss.common.protocol.StorageHint.Type.{HDD, SSD}
+import com.aliyun.emr.rss.common.protocol.StorageHint.Type
 import com.aliyun.emr.rss.common.util.Utils
 
 class RssConf(loadDefaults: Boolean) extends Cloneable with Logging with Serializable {
@@ -490,21 +492,8 @@ object RssConf extends Logging {
     conf.getSizeAsBytes("rss.worker.flush.buffer.size", "256k")
   }
 
-  def workerFlushQueueCapacity(conf: RssConf): Int = {
-    conf.getInt("rss.worker.flush.queue.capacity", 512)
-  }
-
   def workerFetchChunkSize(conf: RssConf): Long = {
     conf.getSizeAsBytes("rss.worker.fetch.chunk.size", "8m")
-  }
-
-  def workerNumSlots(conf: RssConf, numDisks: Int): Int = {
-    val userNumSlots = conf.getInt("rss.worker.numSlots", -1)
-    if (userNumSlots > 0) {
-      userNumSlots
-    } else {
-      workerFlushQueueCapacity(conf: RssConf) * numDisks
-    }
   }
 
   def rpcMaxParallelism(conf: RssConf): Int = {
@@ -548,19 +537,78 @@ object RssConf extends Logging {
     conf.getTimeAsMs("rss.expire.emptyDir.duration", "2h")
   }
 
-  def workerBaseDirs(conf: RssConf): Array[String] = {
+  def diskSpaceMonitorInterval(conf: RssConf): Long = {
+    Utils.timeStringAsMs(conf.get("rss.disk.space.monitor.interval", "15s"))
+  }
+
+  def partitionSize(conf: RssConf): Long = {
+    Utils.byteStringAsBytes(conf.get("rss.partition.size", "64m"))
+  }
+
+  def workerBaseDirs(conf: RssConf): Array[(String, Long, Int, Type)] = {
+    var maxCapacity = 1024L * 1024 * 1024 * 1024 * 1024
     val baseDirs = conf.get("rss.worker.base.dirs", "")
     if (baseDirs.nonEmpty) {
-      baseDirs.split(",")
+      if (baseDirs.contains(":")) {
+        var diskType = HDD
+        var flushThread = -1
+        baseDirs
+          .split(",")
+          .map(str => {
+            val parts = str.split(":")
+            val partsIter = parts.iterator
+            val workingDir = partsIter.next()
+            while (partsIter.hasNext) {
+              partsIter.next() match {
+                case capacityStr if capacityStr.startsWith("capacity") =>
+                  maxCapacity = Utils.byteStringAsBytes(capacityStr.split("=")(1))
+                case disktypeStr if disktypeStr.startsWith("disktype") =>
+                  diskType = Type.valueOf(disktypeStr.split("=")(1))
+                case threadCountStr if threadCountStr.startsWith("flushthread") =>
+                  flushThread = threadCountStr.split("=")(1).toInt
+              }
+            }
+            if (flushThread == -1) {
+              flushThread = diskType match {
+                case HDD => HDDFlusherThread(conf)
+                case SSD => SSDFlusherThread(conf)
+              }
+            }
+            (workingDir, maxCapacity, flushThread, diskType)
+          })
+      } else {
+        baseDirs.split(",").map((_, maxCapacity, 1, HDD))
+      }
     } else {
       val prefix = RssConf.workerBaseDirPrefix(conf)
       val number = RssConf.workerBaseDirNumber(conf)
-      (1 to number).map(i => s"$prefix$i").toArray
+      (1 to number).map(i => (s"$prefix$i", maxCapacity, 1, HDD)).toArray
     }
   }
 
-  def diskFlusherThreadCount(conf: RssConf): Int = {
-    conf.getInt("rss.flusher.thread.count", 1)
+  def HDDFlusherThread(conf: RssConf): Int = {
+    conf.getInt("rss.flusher.hdd.thread.count", 1)
+  }
+
+  def SSDFlusherThread(conf: RssConf): Int = {
+    conf.getInt("rss.flusher.ssd.thread.count", 8)
+  }
+
+  def diskMinimumUsableSize(conf: RssConf): Long = {
+    Utils.byteStringAsBytes(conf.get("rss.disk.minimum.usable.size", "10G"))
+  }
+
+  def partitionSizeUpdaterInitialDelay(conf: RssConf): Long = {
+    Utils.timeStringAsMs(conf.get("rss.partition.size.update.initial.delay", "5m"))
+  }
+
+  def partitionSizeUpdateInterval(conf: RssConf): Long = {
+    Utils.timeStringAsMs(conf.get("rss.partition.size.update.interval", "10m"))
+  }
+
+  def availableStorages(conf: RssConf): Array[Type] = {
+    val storages = conf.get("rss.available.storage", "MEM,SSD,HDD,HDFS")
+    storages.toUpperCase().split(",").map(Type.valueOf(_))
   }
 
   def workerBaseDirPrefix(conf: RssConf): String = {
@@ -817,15 +865,24 @@ object RssConf extends Logging {
       "10s")).toInt
   }
 
-  def storageHint(conf: RssConf): PartitionLocation.StorageHint = {
-    val default = PartitionLocation.StorageHint.MEMORY
-    val hintStr = conf.get("rss.storage.hint", "memory").toUpperCase
-    if (PartitionLocation.StorageHint.values().mkString.toUpperCase.contains(hintStr)) {
+  def defaultStorageType(conf: RssConf): StorageHint.Type = {
+    val default = StorageHint.Type.MEMORY
+    val hintStr = conf.get("rss.storage.type", "memory").toUpperCase
+    if (StorageHint.Type.values().mkString.toUpperCase.contains(hintStr)) {
       logWarning(s"storage hint is invalid ${hintStr}")
-      PartitionLocation.StorageHint.valueOf(hintStr)
+      StorageHint.Type.valueOf(hintStr)
     } else {
       default
     }
+  }
+
+  def offerSlotsAlgorithmVersion(conf: RssConf): String = {
+    var version = conf.get("rss.offer.slots.algorithm.version", "V2")
+    if (version != "V1" || version != "V2") {
+      logWarning("Config rss.offer.slots.algorithm.version is wrong. Use default V2")
+      version = "V2"
+    }
+    version
   }
 
   val WorkingDirName = "hadoop/rss-worker/shuffle_data"

@@ -24,6 +24,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.aliyun.emr.rss.common.RssConf;
+import com.aliyun.emr.rss.common.meta.DiskInfo;
 import com.aliyun.emr.rss.common.meta.WorkerInfo;
 import com.aliyun.emr.rss.common.rpc.RpcEnv;
 
@@ -33,26 +34,23 @@ public class SingleMasterMetaManager extends AbstractMetaManager {
   public SingleMasterMetaManager(RpcEnv rpcEnv, RssConf conf) {
     this.rpcEnv = rpcEnv;
     this.conf = conf;
+    this.defaultPartitionSize = RssConf.partitionSize(conf);
+    this.estimatedPartitionSize = defaultPartitionSize;
   }
 
   @Override
   public void handleRequestSlots(
-      String shuffleKey,
-      String hostName,
-      Map<WorkerInfo, Integer> workerToAllocatedSlots,
-      String requestId) {
-    updateRequestSlotsMeta(shuffleKey, hostName, null);
-    synchronized (workers) {
-      for (WorkerInfo workerInfo : workerToAllocatedSlots.keySet()) {
-        workerInfo.allocateSlots(shuffleKey, workerToAllocatedSlots.get(workerInfo));
-      }
-    }
+    String shuffleKey,
+    String hostName,
+    Map<String, Map<String, Integer>> workerToAllocatedSlots,
+    String requestId) {
+    updateRequestSlotsMeta(shuffleKey, hostName, workerToAllocatedSlots);
   }
 
   @Override
   public void handleReleaseSlots(String shuffleKey, List<String> workerIds,
-                                 List<Integer> slots, String requestId) {
-    updateReleaseSlotsMeta(shuffleKey, workerIds, slots);
+    List<Map<String, Integer>> slotStrings, String requestId) {
+    updateReleaseSlotsMeta(shuffleKey, workerIds, slotStrings);
   }
 
   @Override
@@ -61,7 +59,12 @@ public class SingleMasterMetaManager extends AbstractMetaManager {
   }
 
   @Override
-  public void handleAppHeartbeat(String appId, long time, String requestId) {
+  public void handleAppHeartbeat(
+    String appId,
+    long totalWritten,
+    long fileCount,
+    long time,
+    String requestId) {
     updateAppHeartBeatMeta(appId, time);
   }
 
@@ -78,18 +81,22 @@ public class SingleMasterMetaManager extends AbstractMetaManager {
 
   @Override
   public void handleWorkerHeartBeat(String host, int rpcPort, int pushPort, int fetchPort,
-    int replicatePort, int numSlots, long time, String requestId) {
-    updateWorkerHeartBeatMeta(host, rpcPort, pushPort, fetchPort, replicatePort, numSlots, time);
+    int replicatePort, Map<String, DiskInfo> disks, long time, String requestId) {
+    updateWorkerHeartBeatMeta(host, rpcPort, pushPort, fetchPort, replicatePort, disks, time);
   }
 
   @Override
   public void handleRegisterWorker(String host, int rpcPort, int pushPort, int fetchPort,
-    int replicatePort, int numSlots, String requestId) {
-    updateRegisterWorkerMeta(host, rpcPort, pushPort, fetchPort, replicatePort, numSlots);
+    int replicatePort, Map<String, DiskInfo> disks, String requestId) {
+    updateRegisterWorkerMeta(host, rpcPort, pushPort, fetchPort, replicatePort, disks);
   }
 
   @Override
   public void handleReportWorkerFailure(List<WorkerInfo> failedNodes, String requestId) {
     updateBlacklistByReportWorkerFailure(failedNodes);
+  }
+
+  public void handleUpdatePartitionSize() {
+    updatePartitionSize();
   }
 }

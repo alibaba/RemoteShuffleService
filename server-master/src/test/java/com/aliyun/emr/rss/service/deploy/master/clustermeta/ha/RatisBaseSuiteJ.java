@@ -35,9 +35,9 @@ public class RatisBaseSuiteJ {
 
   @Before
   public void init() throws Exception {
-    HAMasterMetaManager metaSystem = new HAMasterMetaManager(null, null);
-    MetaHandler handler = new MetaHandler(metaSystem);
     RssConf conf = new RssConf();
+    HAMasterMetaManager metaSystem = new HAMasterMetaManager(null, conf);
+    MetaHandler handler = new MetaHandler(metaSystem);
     File tmpDir1 = File.createTempFile("rss-ratis-tmp", "for-test-only");
     tmpDir1.delete();
     tmpDir1.mkdirs();
