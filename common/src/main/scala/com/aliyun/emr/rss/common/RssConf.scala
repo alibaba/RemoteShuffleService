@@ -17,6 +17,7 @@
 
 package com.aliyun.emr.rss.common
 
+import java.lang.management.ManagementFactory
 import java.util.{Map => JMap}
 import java.util.concurrent.ConcurrentHashMap
 
@@ -713,6 +714,15 @@ object RssConf extends Logging {
    */
   def diskSpaceSafeWatermarkSizeInGb(conf: RssConf): Long = {
     conf.getSizeAsGb("rss.disk.space.safe.watermark.size", "0GB")
+  }
+
+  /**
+   * Be aware that [rss.worker.systemLoad.threshold] should be value between (0, 1]
+   * @param conf rss config
+   * @return the threshold value of system load
+   */
+  def workerSystemLoadThreshold(conf: RssConf): Double = {
+    conf.getDouble("rss.worker.systemLoad.threshold", 0.95)
   }
 
   def workerStatusCheckTimeout(conf: RssConf): Long = {

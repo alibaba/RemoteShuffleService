@@ -21,7 +21,8 @@ public enum DeviceErrorType {
   ReadOrWriteFailure(1),
   IoHang(2),
   InsufficientDiskSpace(3),
-  FlushTimeout(4);
+  FlushTimeout(4),
+  SystemHighLoad(5);
 
   private final byte value;
 
@@ -36,6 +37,7 @@ public enum DeviceErrorType {
 
   public static boolean criticalError(DeviceErrorType error) {
     return error.equals(DeviceErrorType.IoHang) ||
-            error.equals(DeviceErrorType.ReadOrWriteFailure);
+        error.equals(DeviceErrorType.ReadOrWriteFailure) ||
+        error.equals(DeviceErrorType.SystemHighLoad);
   }
 }

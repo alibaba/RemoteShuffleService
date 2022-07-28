@@ -18,6 +18,7 @@
 package com.aliyun.emr.rss.service.deploy.worker
 
 import java.io.{BufferedReader, File, FileInputStream, InputStreamReader, IOException}
+import java.lang.management.ManagementFactory
 import java.nio.charset.Charset
 import java.util
 import java.util.{Set => jSet}
@@ -186,29 +187,40 @@ class LocalDeviceMonitor(essConf: RssConf, observer: DeviceObserver,
       override def run(): Unit = {
         logger.debug("Device check start")
         try {
-          observedDevices.values().asScala.foreach(device => {
-            val checkDirs = device.mountInfos.flatMap(mount => mount.dirInfos)
-
-            if (device.checkIoHang()) {
-              logger.error(s"Encounter disk io hang error!" +
-                s"${device.deviceInfo.name}, notify observers")
-              device.notifyObserversOnError(checkDirs, DeviceErrorType.IoHang)
-            } else {
-              device.mountInfos.foreach(entry => {
-                if (DeviceMonitor.checkDiskUsage(essConf, entry.mountPoint)) {
-                  logger.error(s"${entry.mountPoint} high_disk_usage error, notify observers")
-                  device.notifyObserversOnHighDiskUsage(entry.dirInfos)
-                } else if (DeviceMonitor.checkDiskReadAndWrite(essConf, entry.dirInfos)) {
-                  logger.error(s"${entry.mountPoint} read-write error, notify observers")
-                  // We think that if one dir in device has read-write problem, if possible all
-                  // dirs in this device have the problem
-                  device.notifyObserversOnError(entry.dirInfos, DeviceErrorType.ReadOrWriteFailure)
-                } else {
-                  device.notifyObserversOnHealthy(entry.dirInfos)
-                }
-              })
+          if (DeviceMonitor.checkSystemLoad(essConf)) {
+            // When system high load, remove all working dirs.
+            observedDevices.values().asScala.foreach { device =>
+              device.notifyObserversOnError(
+                device.mountInfos.flatMap(mount => mount.dirInfos),
+                DeviceErrorType.SystemHighLoad)
             }
-          })
+          } else {
+            observedDevices.values().asScala.foreach(device => {
+              val checkDirs = device.mountInfos.flatMap(mount => mount.dirInfos)
+
+              if (device.checkIoHang()) {
+                logger.error(s"Encounter disk io hang error!" +
+                  s"${device.deviceInfo.name}, notify observers")
+                device.notifyObserversOnError(checkDirs, DeviceErrorType.IoHang)
+              } else {
+                device.mountInfos.foreach(entry => {
+                  if (DeviceMonitor.checkDiskUsage(essConf, entry.mountPoint)) {
+                    logger.error(s"${entry.mountPoint} high_disk_usage error, notify observers")
+                    device.notifyObserversOnHighDiskUsage(entry.dirInfos)
+                  } else if (DeviceMonitor.checkDiskReadAndWrite(essConf, entry.dirInfos)) {
+                    logger.error(s"${entry.mountPoint} read-write error, notify observers")
+                    // We think that if one dir in device has read-write problem, if possible all
+                    // dirs in this device have the problem
+                    device.notifyObserversOnError(
+                      entry.dirInfos,
+                      DeviceErrorType.ReadOrWriteFailure)
+                  } else {
+                    device.notifyObserversOnHealthy(entry.dirInfos)
+                  }
+                })
+              }
+            })
+          }
         } catch {
           case t: Throwable =>
             logger.error("Device check failed.", t)
@@ -276,26 +288,41 @@ object DeviceMonitor {
     }
   }
 
+  def checkSystemLoad(rssConf: RssConf): Boolean = {
+    tryWithTimeoutAndCallback {
+      val systemLoad = ManagementFactory.getOperatingSystemMXBean.getSystemLoadAverage
+      val status = systemLoad > RssConf.workerSystemLoadThreshold(rssConf)
+      if (status) {
+        logger.warn(s"Worker system load:${systemLoad} higher than " +
+          s"threshold: ${RssConf.workerSystemLoadThreshold(rssConf)}.")
+      }
+      status
+    }(true)(
+        deviceCheckThreadPool,
+        RssConf.workerStatusCheckTimeout(rssConf),
+        s"System Load Check Timeout")
+  }
+
   /**
    * check if the disk is high usage
    * @param rssConf conf
    * @param diskRootPath disk root path
    * @return true if high disk usage
    */
-  def checkDiskUsage(essConf: RssConf, diskRootPath: String): Boolean = {
+  def checkDiskUsage(rssConf: RssConf, diskRootPath: String): Boolean = {
     tryWithTimeoutAndCallback({
       val usage = runCommand(s"df -B 1G $diskRootPath").trim.split("[ \t]+")
       val totalSpace = usage(usage.length - 1)
       val freeSpace = usage(usage.length - 3)
       val used_percent = usage(usage.length - 2)
 
-      val status = freeSpace.toLong < RssConf.diskSpaceSafeWatermarkSizeInGb(essConf)
+      val status = freeSpace.toLong < RssConf.diskSpaceSafeWatermarkSizeInGb(rssConf)
       if (status) {
         logger.warn(s"$diskRootPath usage:{total:$totalSpace GB," +
           s" free:$freeSpace GB, used_percent:$used_percent}")
       }
       status
-    })(true)(deviceCheckThreadPool, RssConf.workerStatusCheckTimeout(essConf),
+    })(true)(deviceCheckThreadPool, RssConf.workerStatusCheckTimeout(rssConf),
       s"Disk: $diskRootPath Usage Check Timeout")
   }
 
@@ -305,7 +332,7 @@ object DeviceMonitor {
    * @param dataDirs shuffle data dirs in on mount disk
    * @return true if disk has read-write problem
    */
-  def checkDiskReadAndWrite(essConf: RssConf, dataDirs: ListBuffer[File]): Boolean = {
+  def checkDiskReadAndWrite(rssConf: RssConf, dataDirs: ListBuffer[File]): Boolean = {
     if (null == dataDirs || dataDirs.isEmpty) {
       return false
     }
@@ -342,7 +369,7 @@ object DeviceMonitor {
             logger.error(s"Disk $dir cannot read or write", t)
             false
         }
-      })(false)(deviceCheckThreadPool, RssConf.workerStatusCheckTimeout(essConf),
+      })(false)(deviceCheckThreadPool, RssConf.workerStatusCheckTimeout(rssConf),
         s"Disk: $dir Read_Write Check Timeout")
     }
 
