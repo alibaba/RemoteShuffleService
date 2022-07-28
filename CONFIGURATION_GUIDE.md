@@ -38,6 +38,7 @@ memory. Empirically, RSS worker off-heap memory should be set to `(numDirs * que
 | spark.rss.fetch.chunk.timeout | 120s | Timeout for a task to fetch chunk. |
 | spark.rss.fetch.chunk.maxReqsInFlight | 3 | Amount of in-flight chunk fetch request. |
 | spark.rss.data.io.threads | 8 | Amount of thread count for task to push data.  |
+| spark.rss.data.io.numConnectionsPerPeer | 1 | Number of concurrent connections between two nodes for Spark executor push data.  |
 | spark.rss.push.data.replicate | true | When true the RSS worker will replicate shuffle data to another RSS worker to ensure shuffle data won't be lost after the node failure. |
 | spark.rss.application.heartbeatInterval | 10s | Application heartbeat interval. |
 | spark.rss.stage.end.timeout | 240s | Time out for StageEnd. |

@@ -115,7 +115,7 @@ public class TransportConf {
 
   /** Number of concurrent connections between two nodes for fetching data. */
   public int numConnectionsPerPeer() {
-    return conf.getInt(RSS_NETWORK_IO_NUMCONNECTIONSPERPEER_KEY, 8);
+    return conf.getInt(RSS_NETWORK_IO_NUMCONNECTIONSPERPEER_KEY, 1);
   }
 
   /** Requested maximum length of the queue of incoming connections. Default -1 for no backlog. */
