@@ -24,6 +24,7 @@ import javax.annotation.Nullable;
 
 import scala.Option;
 import scala.Product2;
+import scala.reflect.ClassTag;
 import scala.reflect.ClassTag$;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -54,6 +55,7 @@ public class SortBasedShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
 
   private static final Logger logger = LoggerFactory.getLogger(SortBasedShuffleWriter.class);
 
+  private static final ClassTag<Object> OBJECT_CLASS_TAG = ClassTag$.MODULE$.Object();
   private static final int DEFAULT_INITIAL_SER_BUFFER_SIZE = 1024 * 1024;
 
   private final ShuffleDependency<K, V, C> dep;
@@ -211,8 +213,8 @@ public class SortBasedShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
       final K key = record._1();
       final int partitionId = partitioner.getPartition(key);
       serBuffer.reset();
-      serOutputStream.writeKey(key, ClassTag$.MODULE$.apply(key.getClass()));
-      serOutputStream.writeValue(record._2(), ClassTag$.MODULE$.apply(record._2().getClass()));
+      serOutputStream.writeKey(key, OBJECT_CLASS_TAG);
+      serOutputStream.writeValue(record._2(), OBJECT_CLASS_TAG);
       serOutputStream.flush();
 
       final int serializedRecordSize = serBuffer.size();
